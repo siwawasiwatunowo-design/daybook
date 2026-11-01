@@ -1,6 +1,7 @@
 package com.example.daybook
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.os.Build
@@ -273,7 +274,8 @@ class VM : ViewModel() {
 
 val TABS = listOf(
     Triple("block", "Timebox", "🗓"), Triple("note", "Notes", "📝"),
-    Triple("dream", "Dreams", "🌙"), Triple("bucket", "Bucket list", "⭐")
+    Triple("dream", "Dreams", "🌙"), Triple("bucket", "Bucket list", "⭐"),
+    Triple("record", "Rekam", "🎙")
 )
 val TAGS = mapOf(
     "note"   to listOf("Journal", "Learning", "Thoughts", "Ideas"),
@@ -293,6 +295,7 @@ val TEXT_COLORS = listOf(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RecordingRepository.init(applicationContext)
         setContent {
             val ctx = LocalContext.current
             val dark = isSystemInDarkTheme()
@@ -330,8 +333,137 @@ fun Home(vm: VM) {
             }
         }
     ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) { key(tab) { Screen(TABS[tab].first, vm) } }
+        Box(Modifier.padding(pad).fillMaxSize()) {
+            key(tab) {
+                val t = TABS[tab].first
+                if (t == "record") RecordingsScreen(vm) else Screen(t, vm)
+            }
+        }
     }
+}
+
+// ─── Recordings Tab ───────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RecordingsScreen(vm: VM) {
+    val context = LocalContext.current
+    val recs by RecordingRepository.recordings.collectAsState()
+    var showStart by remember { mutableStateOf(false) }
+    var title by remember { mutableStateOf("") }
+    var expandedId by remember { mutableStateOf<String?>(null) }
+
+    val perms = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants[Manifest.permission.RECORD_AUDIO] == true) {
+            startRecording(context, title)
+            showStart = false; title = ""
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        if (recs.isEmpty()) {
+            Text("Belum ada rekaman. Tap 🎙 untuk mulai merekam.", Modifier.padding(16.dp))
+        } else {
+            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+                items(recs, key = { it.id }) { r ->
+                    val active = r.status == "RECORDING"
+                    ListItem(
+                        modifier = Modifier.clickable {
+                            expandedId = if (expandedId == r.id) null else r.id
+                        },
+                        headlineContent = { Text(r.title.ifBlank { "Meeting" }, fontWeight = FontWeight.Medium) },
+                        supportingContent = {
+                            Column {
+                                Text("${r.chunks.size} chunk • ${statusLabel(r.status)}",
+                                    style = MaterialTheme.typography.bodySmall)
+                                val transcribed = r.chunks.count { it.status == "TRANSCRIBED" }
+                                if (r.status == "PROCESSING" || r.chunks.any { it.status == "TRANSCRIBING" })
+                                    Text("Transkrip: $transcribed/${r.chunks.size} chunk",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary)
+                                if (expandedId == r.id && r.chunks.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    r.chunks.forEach { c ->
+                                        Text("   • chunk ${c.index}: ${statusLabel(c.status)}",
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        },
+                        trailingContent = {
+                            when {
+                                active -> Button(onClick = { stopRecording(context) }) { Text("Stop") }
+                                r.mom.isNotBlank() -> Text("MoM ✓", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = { showStart = true },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+        ) { Icon(Icons.Default.Mic, "Rekam") }
+    }
+
+    if (showStart) {
+        AlertDialog(
+            onDismissRequest = { showStart = false; title = "" },
+            title = { Text("Mulai Rekaman") },
+            text = {
+                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(),
+                    label = { Text("Judul (opsional)" ) }, singleLine = true)
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startRecording(context, title)
+                        showStart = false; title = ""
+                    } else {
+                        perms.launch(arrayOf(
+                            Manifest.permission.RECORD_AUDIO,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ))
+                    }
+                }) { Text("Mulai") }
+            },
+            dismissButton = { TextButton({ showStart = false; title = "" }) { Text("Batal") } }
+        )
+    }
+}
+
+private fun statusLabel(s: String): String = when (s) {
+    "RECORDING" -> "Merekam"
+    "RECORDED" -> "tersimpan"
+    "TRANSCRIBING" -> "mentranskrip…"
+    "TRANSCRIBED" -> "transkrip ✓"
+    "PROCESSING" -> "memproses"
+    "DONE" -> "selesai"
+    "FAILED" -> "gagal"
+    else -> s
+}
+
+/** Starts the foreground recording service for a new session. */
+private fun startRecording(context: android.content.Context, title: String) {
+    val id = System.currentTimeMillis().toString()
+    val intent = Intent(context, RecordingService::class.java).apply {
+        action = RecordingService.ACTION_START
+        putExtra(RecordingService.EXTRA_ID, id)
+        putExtra(RecordingService.EXTRA_TITLE, title.ifBlank { "Meeting" })
+    }
+    ContextCompat.startForegroundService(context, intent)
+}
+
+/** Stops the foreground recording service. */
+private fun stopRecording(context: android.content.Context) {
+    val intent = Intent(context, RecordingService::class.java).apply { action = RecordingService.ACTION_STOP }
+    ContextCompat.startForegroundService(context, intent)
 }
 
 // ─── Section Screen ──────────────────────────────────────────────────────────

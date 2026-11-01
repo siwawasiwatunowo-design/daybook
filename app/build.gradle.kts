@@ -36,6 +36,9 @@ dependencies {
     // Rich text editor for Compose
     implementation("com.mohamedrejeb.richeditor:richeditor-compose:1.0.0-rc10")
 
-    // OkHttp for Gemini REST API calls (audio upload + generate)
+    // OkHttp: used for Vosk model download and the optional Gemini text fallback.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Vosk: offline (on-device) speech recognition for local transcription.
+    implementation("com.alphacephei:vosk-android:0.3.75")
 }
