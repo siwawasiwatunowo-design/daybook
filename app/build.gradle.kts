@@ -36,9 +36,6 @@ dependencies {
     // Rich text editor for Compose
     implementation("com.mohamedrejeb.richeditor:richeditor-compose:1.0.0-rc10")
 
-    // Gemini AI (Google Generative AI SDK)
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
-
-    // OkHttp for Gemini Files API upload
+    // OkHttp for Gemini REST API calls (audio upload + generate)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

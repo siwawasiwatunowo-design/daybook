@@ -39,8 +39,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentId
@@ -165,7 +163,6 @@ class VM : ViewModel() {
         aiResult.value = null
         viewModelScope.launch {
             try {
-                val model = GenerativeModel(modelName = "gemini-2.0-flash", apiKey = GEMINI_API_KEY)
                 val plainBody = noteBodyHtml.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
                 val prompt = """
                     Kamu adalah asisten pribadi yang membantu mereview catatan.
@@ -178,8 +175,7 @@ class VM : ViewModel() {
                     4. **Tindak lanjut** — action item konkret jika ada
                     Gunakan bahasa yang sama dengan catatan. Jawab dengan format yang rapi.
                 """.trimIndent()
-                val response = model.generateContent(prompt)
-                aiResult.value = response.text ?: "Tidak ada respons dari AI."
+                aiResult.value = callGeminiText(prompt)
             } catch (e: Exception) {
                 aiResult.value = "Error: ${e.message}"
             } finally {
@@ -247,9 +243,7 @@ class VM : ViewModel() {
                 // Step 1: Upload audio file to Gemini Files API
                 val fileUri = uploadAudioToGemini(file)
 
-                // Step 2: Generate MOM using the uploaded file URI
-                val model = GenerativeModel(modelName = "gemini-2.0-flash", apiKey = GEMINI_API_KEY)
-
+                // Step 2: Generate MOM via REST API using the uploaded file URI
                 val prompt = """
                     Ini adalah rekaman audio dari sebuah meeting/rapat berjudul "$title".
                     
@@ -285,13 +279,7 @@ class VM : ViewModel() {
                     Jika audio tidak jelas, tulis [tidak terdengar].
                 """.trimIndent()
 
-                val response = model.generateContent(
-                    content {
-                        fileData(mimeType = "audio/mp4", uri = fileUri)
-                        text(prompt)
-                    }
-                )
-                recordingResult.value = response.text ?: "Tidak bisa memproses audio."
+                recordingResult.value = callGeminiWithAudio(fileUri, prompt)
 
                 // Step 3: Delete uploaded file from Gemini (cleanup)
                 deleteGeminiFile(fileUri)
@@ -365,6 +353,64 @@ class VM : ViewModel() {
                 client.newCall(request).execute().close()
             }
         } catch (_: Exception) { /* best effort cleanup */ }
+    }
+
+    /** Call Gemini REST API with plain text prompt. Returns generated text. */
+    private suspend fun callGeminiText(prompt: String): String {
+        val client = okhttp3.OkHttpClient.Builder()
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
+        val body = org.json.JSONObject()
+            .put("contents", org.json.JSONArray()
+                .put(org.json.JSONObject()
+                    .put("parts", org.json.JSONArray()
+                        .put(org.json.JSONObject().put("text", prompt)))))
+            .toString()
+        val request = okhttp3.Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.newCall(request).execute()
+        }
+        val json = org.json.JSONObject(response.body?.string() ?: throw Exception("Empty response"))
+        if (json.has("error")) throw Exception(json.getJSONObject("error").getString("message"))
+        return json.getJSONArray("candidates")
+            .getJSONObject(0)
+            .getJSONObject("content")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+    }
+
+    /** Call Gemini REST API with audio file URI + text prompt. Returns generated text. */
+    private suspend fun callGeminiWithAudio(fileUri: String, prompt: String): String {
+        val client = okhttp3.OkHttpClient.Builder()
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
+        val body = org.json.JSONObject()
+            .put("contents", org.json.JSONArray()
+                .put(org.json.JSONObject()
+                    .put("parts", org.json.JSONArray()
+                        .put(org.json.JSONObject()
+                            .put("file_data", org.json.JSONObject()
+                                .put("mime_type", "audio/mp4")
+                                .put("file_uri", fileUri)))
+                        .put(org.json.JSONObject().put("text", prompt)))))
+            .toString()
+        val request = okhttp3.Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.newCall(request).execute()
+        }
+        val json = org.json.JSONObject(response.body?.string() ?: throw Exception("Empty response"))
+        if (json.has("error")) throw Exception(json.getJSONObject("error").getString("message"))
+        return json.getJSONArray("candidates")
+            .getJSONObject(0)
+            .getJSONObject("content")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
     }
 
     fun cancelRecording() {
