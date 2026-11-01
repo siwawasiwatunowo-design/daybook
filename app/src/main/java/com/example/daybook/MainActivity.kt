@@ -190,15 +190,15 @@ class VM : ViewModel() {
 
     // ── Recording ────────────────────────────────────────────────────────────
 
-    fun startRecording(cacheDir: File) {
+    fun startRecording(context: android.content.Context) {
         if (recordState.value != RecordState.IDLE) return
         try {
-            val file = File(cacheDir, "meeting_${System.currentTimeMillis()}.m4a")
+            val file = File(context.cacheDir, "meeting_${System.currentTimeMillis()}.m4a")
             audioFile = file
 
             @Suppress("DEPRECATION")
             val recorder = if (Build.VERSION.SDK_INT >= 31)
-                MediaRecorder(cacheDir.parentFile!!)
+                MediaRecorder(context)
             else MediaRecorder()
 
             recorder.apply {
@@ -649,7 +649,7 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
             recordState   = recordState,
             recordSeconds = recordSeconds,
             noteTitle     = title,
-            onStart       = { vm.startRecording(context.cacheDir) },
+            onStart       = { vm.startRecording(context) },
             onStop        = { vm.stopRecordingAndTranscribe(title) ; showRecordDialog = false },
             onCancel      = { vm.cancelRecording(); showRecordDialog = false }
         )
