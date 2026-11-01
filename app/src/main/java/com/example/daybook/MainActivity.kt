@@ -55,7 +55,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
-import java.io.File
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -284,7 +286,7 @@ class VM : ViewModel() {
 
                 val response = model.generateContent(
                     content {
-                        fileData(mimeType = "audio/mp4", fileUri = fileUri)
+                        fileData(mimeType = "audio/mp4", uri = fileUri)
                         text(prompt)
                     }
                 )
@@ -314,10 +316,8 @@ class VM : ViewModel() {
         // Step 1: Initiate resumable upload
         val initRequest = okhttp3.Request.Builder()
             .url("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$GEMINI_API_KEY")
-            .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("application/json"),
-                """{"file":{"display_name":"meeting_audio"}}"""
-            ))
+            .post("""{"file":{"display_name":"meeting_audio"}}"""
+                .toRequestBody("application/json".toMediaType()))
             .addHeader("X-Goog-Upload-Protocol", "resumable")
             .addHeader("X-Goog-Upload-Command", "start")
             .addHeader("X-Goog-Upload-Header-Content-Length", file.length().toString())
@@ -333,10 +333,7 @@ class VM : ViewModel() {
         // Step 2: Upload the actual file bytes
         val uploadRequest = okhttp3.Request.Builder()
             .url(uploadUrl)
-            .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("audio/mp4"),
-                file
-            ))
+            .post(file.asRequestBody("audio/mp4".toMediaType()))
             .addHeader("X-Goog-Upload-Command", "upload, finalize")
             .addHeader("X-Goog-Upload-Offset", "0")
             .build()
@@ -344,7 +341,7 @@ class VM : ViewModel() {
         val uploadResponse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             client.newCall(uploadRequest).execute()
         }
-        val body = uploadResponse.body()?.string() ?: throw Exception("Empty upload response")
+        val body = uploadResponse.body?.string() ?: throw Exception("Empty upload response")
 
         // Parse file URI from response JSON
         val uri = org.json.JSONObject(body)
