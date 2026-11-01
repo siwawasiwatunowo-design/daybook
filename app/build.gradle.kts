@@ -39,6 +39,6 @@ dependencies {
     // Gemini AI (Google Generative AI SDK)
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
-    // OkHttp for network (used internally by generativeai)
+    // OkHttp for Gemini Files API upload
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

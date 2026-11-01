@@ -162,7 +162,7 @@ class VM : ViewModel() {
         aiResult.value = null
         viewModelScope.launch {
             try {
-                val model = GenerativeModel(modelName = "gemini-1.5-flash", apiKey = GEMINI_API_KEY)
+                val model = GenerativeModel(modelName = "gemini-2.0-flash", apiKey = GEMINI_API_KEY)
                 val plainBody = noteBodyHtml.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
                 val prompt = """
                     Kamu adalah asisten pribadi yang membantu mereview catatan.
@@ -239,16 +239,18 @@ class VM : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val model = GenerativeModel(modelName = "gemini-1.5-flash", apiKey = GEMINI_API_KEY)
-                val audioBytes = file.readBytes()
                 val title = meetingTitle.ifBlank { "Meeting" }
+
+                // Step 1: Upload audio file to Gemini Files API
+                val fileUri = uploadAudioToGemini(file)
+
+                // Step 2: Generate MOM using the uploaded file URI
+                val model = GenerativeModel(modelName = "gemini-2.0-flash", apiKey = GEMINI_API_KEY)
 
                 val prompt = """
                     Ini adalah rekaman audio dari sebuah meeting/rapat berjudul "$title".
                     
-                    Tolong lakukan hal berikut:
-                    1. Transkripsi seluruh percakapan
-                    2. Buat Minutes of Meeting (MOM) dengan format:
+                    Tolong buat Minutes of Meeting (MOM) dengan format berikut:
                     
                     **MINUTES OF MEETING**
                     **Judul:** $title
@@ -277,24 +279,94 @@ class VM : ViewModel() {
                     - ...
                     
                     Gunakan bahasa yang sama dengan rekaman (Indonesia atau Inggris).
-                    Jika audio tidak jelas atau ada bagian yang tidak terdengar, tulis [tidak terdengar].
+                    Jika audio tidak jelas, tulis [tidak terdengar].
                 """.trimIndent()
 
                 val response = model.generateContent(
                     content {
-                        blob("audio/mp4", audioBytes)
+                        fileData(mimeType = "audio/mp4", fileUri = fileUri)
                         text(prompt)
                     }
                 )
                 recordingResult.value = response.text ?: "Tidak bisa memproses audio."
+
+                // Step 3: Delete uploaded file from Gemini (cleanup)
+                deleteGeminiFile(fileUri)
+
             } catch (e: Exception) {
-                recordingResult.value = "Error memproses rekaman: ${e.message}\n\nTips: Pastikan koneksi internet stabil dan file rekaman tidak terlalu besar."
+                recordingResult.value = "Error: ${e.message}"
             } finally {
                 recordState.value = RecordState.IDLE
                 recordSeconds.value = 0
-                file.delete() // clean up audio file after processing
+                file.delete()
             }
         }
+    }
+
+    /** Upload audio file to Gemini Files API, returns the file URI */
+    private suspend fun uploadAudioToGemini(file: File): String {
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        // Step 1: Initiate resumable upload
+        val initRequest = okhttp3.Request.Builder()
+            .url("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$GEMINI_API_KEY")
+            .post(okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("application/json"),
+                """{"file":{"display_name":"meeting_audio"}}"""
+            ))
+            .addHeader("X-Goog-Upload-Protocol", "resumable")
+            .addHeader("X-Goog-Upload-Command", "start")
+            .addHeader("X-Goog-Upload-Header-Content-Length", file.length().toString())
+            .addHeader("X-Goog-Upload-Header-Content-Type", "audio/mp4")
+            .build()
+
+        val initResponse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.newCall(initRequest).execute()
+        }
+        val uploadUrl = initResponse.header("X-Goog-Upload-URL")
+            ?: throw Exception("Failed to get upload URL")
+
+        // Step 2: Upload the actual file bytes
+        val uploadRequest = okhttp3.Request.Builder()
+            .url(uploadUrl)
+            .post(okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("audio/mp4"),
+                file
+            ))
+            .addHeader("X-Goog-Upload-Command", "upload, finalize")
+            .addHeader("X-Goog-Upload-Offset", "0")
+            .build()
+
+        val uploadResponse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            client.newCall(uploadRequest).execute()
+        }
+        val body = uploadResponse.body()?.string() ?: throw Exception("Empty upload response")
+
+        // Parse file URI from response JSON
+        val uri = org.json.JSONObject(body)
+            .getJSONObject("file")
+            .getString("uri")
+        return uri
+    }
+
+    /** Delete a file from Gemini Files API (cleanup after use) */
+    private suspend fun deleteGeminiFile(fileUri: String) {
+        try {
+            // Extract file name from URI: .../files/abc123 → files/abc123
+            val fileName = fileUri.substringAfter("files.googleapis.com/v1beta/")
+            val client = okhttp3.OkHttpClient()
+            val request = okhttp3.Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/$fileName?key=$GEMINI_API_KEY")
+                .delete()
+                .build()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                client.newCall(request).execute().close()
+            }
+        } catch (_: Exception) { /* best effort cleanup */ }
     }
 
     fun cancelRecording() {
