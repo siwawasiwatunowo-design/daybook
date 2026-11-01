@@ -366,7 +366,7 @@ class VM : ViewModel() {
                         .put(org.json.JSONObject().put("text", prompt)))))
             .toString()
         val request = okhttp3.Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$GEMINI_API_KEY")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -397,7 +397,7 @@ class VM : ViewModel() {
                         .put(org.json.JSONObject().put("text", prompt)))))
             .toString()
         val request = okhttp3.Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$GEMINI_API_KEY")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
