@@ -53,16 +53,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-// ─── Gemini API Key ─────────────────────────────────────────────────────────
-// ⚠️ Keep this repo private — do not make it public while this key is here.
-private const val GEMINI_API_KEY = "AQ.Ab8RN6JYrDhX_0nAkaLP-brB46RRt_aQ7alU26VfusaC_40QzA"
+// NOTE (Phase 1): The hardcoded Gemini API key that lived here was removed for
+// security. Cloud AI (Gemini) is disabled until Phase 7, where it returns as an
+// opt-in feature with a safe key source and explicit per-send consent. Any key
+// that was exposed here or in built APKs must be revoked/rotated at Google.
 
 // ─── Data Model ─────────────────────────────────────────────────────────────
 
@@ -158,30 +156,15 @@ class VM : ViewModel() {
     }
 
     fun reviewWithAI(noteTitle: String, noteBodyHtml: String) {
-        if (aiLoading.value) return
-        aiLoading.value = true
-        aiResult.value = null
-        viewModelScope.launch {
-            try {
-                val plainBody = noteBodyHtml.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-                val prompt = """
-                    Kamu adalah asisten pribadi yang membantu mereview catatan.
-                    Judul catatan: "$noteTitle"
-                    Isi catatan: "$plainBody"
-                    Tolong berikan:
-                    1. **Ringkasan singkat** (2-3 kalimat)
-                    2. **Poin-poin penting** yang perlu diingat
-                    3. **Saran perbaikan** — apakah ada yang bisa diperjelas, ditambah, atau dikurangi?
-                    4. **Tindak lanjut** — action item konkret jika ada
-                    Gunakan bahasa yang sama dengan catatan. Jawab dengan format yang rapi.
-                """.trimIndent()
-                aiResult.value = callGeminiText(prompt)
-            } catch (e: Exception) {
-                aiResult.value = "Error: ${e.message}"
-            } finally {
-                aiLoading.value = false
-            }
-        }
+        // Phase 1: Gemini AI Review is disabled (local-first; API key removed for
+        // security). It returns as an opt-in cloud feature in Phase 7. For now we
+        // just surface a clear "disabled" notice via the existing AI Review sheet.
+        aiResult.value = "AI Review sementara dinonaktifkan.\n\n" +
+            "Fitur ini memakai Gemini (cloud) yang sedang dimatikan demi keamanan — " +
+            "API key telah dihapus dari kode.\n\n" +
+            "AI Review & pembuatan MoM akan kembali sebagai fitur opsional di Fase 7 " +
+            "(dengan persetujuan eksplisit sebelum mengirim data). Sementara itu, " +
+            "rekaman tetap aman tersimpan di perangkat."
     }
 
     fun clearAiResult() { aiResult.value = null }
@@ -192,7 +175,11 @@ class VM : ViewModel() {
     fun startRecording(context: android.content.Context) {
         if (recordState.value != RecordState.IDLE) return
         try {
-            val file = File(context.cacheDir, "meeting_${System.currentTimeMillis()}.m4a")
+            // Phase 1: persistent internal storage — never cacheDir. Recordings
+            // survive app close and cache eviction, and are removed only by an
+            // explicit user delete (added in Phase 2). History UI also comes in P2.
+            val dir = File(context.filesDir, "recordings").apply { if (!exists()) mkdirs() }
+            val file = File(dir, "meeting_${System.currentTimeMillis()}.m4a")
             audioFile = file
 
             @Suppress("DEPRECATION")
@@ -225,193 +212,37 @@ class VM : ViewModel() {
         }
     }
 
-    fun stopRecordingAndTranscribe(meetingTitle: String) {
+    fun stopRecording(meetingTitle: String) {
+        // Phase 1: stop and finalize the recording. Audio is kept permanently in
+        // filesDir/recordings (see startRecording). MoM generation (Gemini) is
+        // disabled until Phase 7, so this no longer transcribes — it only saves.
+        // meetingTitle is accepted for later phases (recording metadata) but not
+        // used yet; proper recording metadata/history is Phase 2.
         if (recordState.value != RecordState.RECORDING) return
         timerJob?.cancel()
         try {
             mediaRecorder?.apply { stop(); release() }
             mediaRecorder = null
-        } catch (e: Exception) { /* ignore */ }
+        } catch (e: Exception) { /* stop() may throw if nothing valid was captured */ }
 
-        val file = audioFile ?: run { recordState.value = RecordState.IDLE; return }
-        recordState.value = RecordState.PROCESSING
+        val file = audioFile
+        audioFile = null
+        recordState.value = RecordState.IDLE
+        recordSeconds.value = 0
 
-        viewModelScope.launch {
-            try {
-                val title = meetingTitle.ifBlank { "Meeting" }
-
-                // Step 1: Upload audio file to Gemini Files API
-                val fileUri = uploadAudioToGemini(file)
-
-                // Step 2: Generate MOM via REST API using the uploaded file URI
-                val prompt = """
-                    Ini adalah rekaman audio dari sebuah meeting/rapat berjudul "$title".
-                    
-                    Tolong buat Minutes of Meeting (MOM) dengan format berikut:
-                    
-                    **MINUTES OF MEETING**
-                    **Judul:** $title
-                    **Tanggal:** ${LocalDate.now()}
-                    
-                    **PESERTA** (jika disebutkan dalam rekaman):
-                    - ...
-                    
-                    **AGENDA** (jika disebutkan):
-                    - ...
-                    
-                    **RINGKASAN DISKUSI:**
-                    - Poin utama 1
-                    - Poin utama 2
-                    - dst.
-                    
-                    **KEPUTUSAN YANG DIAMBIL:**
-                    - ...
-                    
-                    **ACTION ITEMS:**
-                    | No | Action | PIC | Deadline |
-                    |----|--------|-----|----------|
-                    | 1  | ...    | ... | ...      |
-                    
-                    **CATATAN TAMBAHAN:**
-                    - ...
-                    
-                    Gunakan bahasa yang sama dengan rekaman (Indonesia atau Inggris).
-                    Jika audio tidak jelas, tulis [tidak terdengar].
-                """.trimIndent()
-
-                recordingResult.value = callGeminiWithAudio(fileUri, prompt)
-
-                // Step 3: Delete uploaded file from Gemini (cleanup)
-                deleteGeminiFile(fileUri)
-
-            } catch (e: Exception) {
-                recordingResult.value = "Error: ${e.message}"
-            } finally {
-                recordState.value = RecordState.IDLE
-                recordSeconds.value = 0
-                file.delete()
-            }
+        // Finalize + validate: keep real recordings, drop empty stubs only.
+        // A zero-length file means the recorder produced nothing usable (e.g.
+        // stopped immediately) — it is not a recording. This is validation, not
+        // auto-deletion of audio. Duration/playability validation is refined in
+        // Phase 2 (playback) and Phase 4 (per-chunk checks).
+        if (file != null && file.exists() && file.length() == 0L) {
+            file.delete()
         }
     }
 
-    /** Upload audio file to Gemini Files API, returns the file URI */
-    private suspend fun uploadAudioToGemini(file: File): String {
-        val client = okhttp3.OkHttpClient.Builder()
-            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-
-        // Step 1: Initiate resumable upload
-        val initRequest = okhttp3.Request.Builder()
-            .url("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$GEMINI_API_KEY")
-            .post("""{"file":{"display_name":"meeting_audio"}}"""
-                .toRequestBody("application/json".toMediaType()))
-            .addHeader("X-Goog-Upload-Protocol", "resumable")
-            .addHeader("X-Goog-Upload-Command", "start")
-            .addHeader("X-Goog-Upload-Header-Content-Length", file.length().toString())
-            .addHeader("X-Goog-Upload-Header-Content-Type", "audio/mp4")
-            .build()
-
-        val initResponse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            client.newCall(initRequest).execute()
-        }
-        val uploadUrl = initResponse.header("X-Goog-Upload-URL")
-            ?: throw Exception("Failed to get upload URL")
-
-        // Step 2: Upload the actual file bytes
-        val uploadRequest = okhttp3.Request.Builder()
-            .url(uploadUrl)
-            .post(file.asRequestBody("audio/mp4".toMediaType()))
-            .addHeader("X-Goog-Upload-Command", "upload, finalize")
-            .addHeader("X-Goog-Upload-Offset", "0")
-            .build()
-
-        val uploadResponse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            client.newCall(uploadRequest).execute()
-        }
-        val body = uploadResponse.body?.string() ?: throw Exception("Empty upload response")
-
-        // Parse file URI from response JSON
-        val uri = org.json.JSONObject(body)
-            .getJSONObject("file")
-            .getString("uri")
-        return uri
-    }
-
-    /** Delete a file from Gemini Files API (cleanup after use) */
-    private suspend fun deleteGeminiFile(fileUri: String) {
-        try {
-            // Extract file name from URI: .../files/abc123 → files/abc123
-            val fileName = fileUri.substringAfter("files.googleapis.com/v1beta/")
-            val client = okhttp3.OkHttpClient()
-            val request = okhttp3.Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/$fileName?key=$GEMINI_API_KEY")
-                .delete()
-                .build()
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                client.newCall(request).execute().close()
-            }
-        } catch (_: Exception) { /* best effort cleanup */ }
-    }
-
-    /** Call Gemini REST API with plain text prompt. Returns generated text. */
-    private suspend fun callGeminiText(prompt: String): String {
-        val client = okhttp3.OkHttpClient.Builder()
-            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
-        val body = org.json.JSONObject()
-            .put("contents", org.json.JSONArray()
-                .put(org.json.JSONObject()
-                    .put("parts", org.json.JSONArray()
-                        .put(org.json.JSONObject().put("text", prompt)))))
-            .toString()
-        val request = okhttp3.Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$GEMINI_API_KEY")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
-        val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            client.newCall(request).execute()
-        }
-        val json = org.json.JSONObject(response.body?.string() ?: throw Exception("Empty response"))
-        if (json.has("error")) throw Exception(json.getJSONObject("error").getString("message"))
-        return json.getJSONArray("candidates")
-            .getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-            .getJSONObject(0)
-            .getString("text")
-    }
-
-    /** Call Gemini REST API with audio file URI + text prompt. Returns generated text. */
-    private suspend fun callGeminiWithAudio(fileUri: String, prompt: String): String {
-        val client = okhttp3.OkHttpClient.Builder()
-            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS).build()
-        val body = org.json.JSONObject()
-            .put("contents", org.json.JSONArray()
-                .put(org.json.JSONObject()
-                    .put("parts", org.json.JSONArray()
-                        .put(org.json.JSONObject()
-                            .put("file_data", org.json.JSONObject()
-                                .put("mime_type", "audio/mp4")
-                                .put("file_uri", fileUri)))
-                        .put(org.json.JSONObject().put("text", prompt)))))
-            .toString()
-        val request = okhttp3.Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$GEMINI_API_KEY")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
-        val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            client.newCall(request).execute()
-        }
-        val json = org.json.JSONObject(response.body?.string() ?: throw Exception("Empty response"))
-        if (json.has("error")) throw Exception(json.getJSONObject("error").getString("message"))
-        return json.getJSONArray("candidates")
-            .getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-            .getJSONObject(0)
-            .getString("text")
-    }
+    // Phase 1: the Gemini REST helpers (uploadAudioToGemini, callGeminiText,
+    // callGeminiWithAudio, deleteGeminiFile) were removed along with the
+    // hardcoded API key. Gemini returns as an opt-in, safe-key feature in Phase 7.
 
     fun cancelRecording() {
         timerJob?.cancel()
@@ -423,9 +254,18 @@ class VM : ViewModel() {
     }
 
     override fun onCleared() {
+        // Phase 1: NEVER delete recordings automatically. Previously this deleted
+        // any in-flight audio when the ViewModel was cleared (app close, config
+        // change, logout), silently destroying recordings. Now we only try to
+        // finalize (stop+release) so the file is playable on graceful teardown;
+        // the file always stays on disk. (Process-kill recovery is Phase 4.)
         super.onCleared()
-        mediaRecorder?.release()
-        audioFile?.delete()
+        try {
+            mediaRecorder?.apply { stop(); release() }
+        } catch (e: Exception) {
+            try { mediaRecorder?.release() } catch (_: Exception) { }
+        }
+        mediaRecorder = null
     }
 }
 
@@ -766,7 +606,7 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
             recordSeconds = recordSeconds,
             noteTitle     = title,
             onStart       = { vm.startRecording(context) },
-            onStop        = { vm.stopRecordingAndTranscribe(title) ; showRecordDialog = false },
+            onStop        = { vm.stopRecording(title) ; showRecordDialog = false },
             onCancel      = { vm.cancelRecording(); showRecordDialog = false }
         )
     }
@@ -823,7 +663,7 @@ fun RecordingDialog(
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(8.dp))
-                    Text("Rekam percakapan meeting kamu.\nSetelah selesai, AI akan membuat MOM otomatis.",
+                    Text("Rekam percakapan meeting kamu.\nRekaman disimpan permanen di perangkat.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (noteTitle.isNotBlank()) {
@@ -837,11 +677,12 @@ fun RecordingDialog(
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(8.dp))
-                    Text("Rekam meeting kamu, lalu AI Gemini akan otomatis membuat:\n\n" +
-                        "• Transkripsi percakapan\n" +
-                        "• Ringkasan diskusi\n" +
-                        "• Keputusan yang diambil\n" +
-                        "• Action items",
+                    Text("Rekam meeting kamu. Rekaman disimpan\n" +
+                        "permanen di perangkat.\n\n" +
+                        "Pembuatan MoM otomatis (transkripsi,\n" +
+                        "ringkasan, keputusan, action items) akan\n" +
+                        "datang di fase berikutnya — secara lokal,\n" +
+                        "tanpa internet.",
                         style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -852,7 +693,7 @@ fun RecordingDialog(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                     Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Stop & Buat MOM")
+                    Text("Stop")
                 }
             } else {
                 Button(onClick = onStart) {
