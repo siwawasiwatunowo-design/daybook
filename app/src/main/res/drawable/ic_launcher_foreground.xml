@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Compass icon — minimalist needle design
+  Dark blue background handled by ic_launcher_background.xml
+  This foreground is the white compass needle + ring, centered in a 108x108dp safe zone
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer thin circle ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:pathData="M54,20 A34,34 0 1,1 53.99,20 Z" />
+
+    <!-- North needle (pointing up-right) — white solid -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="
+            M54,54
+            L47,68
+            L54,63
+            L61,68
+            Z" />
+
+    <!-- South needle (pointing down-left) — white semi-transparent -->
+    <path
+        android:fillColor="#AAFFFFFF"
+        android:pathData="
+            M54,54
+            L47,40
+            L54,45
+            L61,40
+            Z" />
+
+    <!-- Center dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+
+    <!-- Cardinal direction marks: N, S, E, W — small tick lines -->
+    <!-- North tick -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,22 L54,27" />
+    <!-- South tick -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,81 L54,86" />
+    <!-- East tick -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M81,54 L86,54" />
+    <!-- West tick -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M22,54 L27,54" />
+
+</vector>
