@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "2849436950",
+    "project_id": "daybook-53705",
+    "storage_bucket": "daybook-53705.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:2849436950:android:6a8055436af13246988c37",
+        "android_client_info": {
+          "package_name": "com.example.daybook"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCtvAostgEcl9YpAf_LICxQLdenwu3akXA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
