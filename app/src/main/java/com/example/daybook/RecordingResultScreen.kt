@@ -4,21 +4,27 @@ import android.content.Intent
 import android.text.TextUtils
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 
@@ -50,6 +56,23 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
 
     var showSaveDialog by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+
+    // Audio playback: all chunks as one timeline, same clock as the transcript segments.
+    val player = remember(rec.id, rec.chunks.size) {
+        RecordingPlayer(
+            rec.chunks.map { RecordingRepository.chunkFile(rec.id, it.fileName) },
+            rec.chunks.map { it.durationMs }
+        )
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(player, player.playing) {
+        while (player.playing) { player.tick(); delay(250) }
+    }
+    LaunchedEffect(player.error) {
+        player.error?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show(); player.clearError() }
+    }
+    var dragging by remember { mutableStateOf(false) }
+    var sliderPos by remember { mutableFloatStateOf(0f) }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -87,8 +110,31 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             }
         }
 
+        if (player.totalMs > 0) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { player.toggle() }) {
+                    Icon(
+                        if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        if (player.playing) "Jeda" else "Putar"
+                    )
+                }
+                Slider(
+                    value = if (dragging) sliderPos else player.positionMs.toFloat().coerceIn(0f, player.totalMs.toFloat()),
+                    onValueChange = { dragging = true; sliderPos = it },
+                    onValueChangeFinished = { player.seek(sliderPos.toLong()); dragging = false },
+                    valueRange = 0f..player.totalMs.toFloat(),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "${formatClock(if (dragging) sliderPos.toLong() else player.positionMs)} / ${formatClock(player.totalMs)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
         Text(
-            "Transkrip otomatis (Whisper, offline) — bisa ada salah dengar, terutama nama dan istilah teknis.",
+            "Transkrip otomatis (Whisper, offline) — bisa ada salah dengar, terutama nama dan istilah teknis. " +
+                "Ketuk satu baris untuk memutar audio dari momen itu.",
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -112,7 +158,14 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             } else if (segs.isEmpty()) item {
                 Text(fallback)
             } else items(segs) { s ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                val active = (player.playing || player.positionMs > 0L) &&
+                    player.positionMs >= s.startMs && player.positionMs < s.endMs
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(if (active) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .clickable(enabled = player.totalMs > 0) { player.playFrom(s.startMs) }
+                        .padding(vertical = 6.dp)
+                ) {
                     Text("[${formatClock(s.startMs)}]", Modifier.width(72.dp),
                         color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                     Text(s.text, Modifier.weight(1f))
