@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- WorkManager STT foreground worker (Android 14+): dataSync type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- PARTIAL_WAKE_LOCK so recording survives screen off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Short vibration feedback when a Tandai mark is pressed (§6.1). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
+        android:name=".DaybookApp"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Daybook"
@@ -25,5 +35,11 @@
             android:name=".RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <!-- Required on Android 14+: WorkManager's foreground service must declare the
+             type used by SttWorker.setForeground (dataSync), otherwise it crashes. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
     </application>
 </manifest>

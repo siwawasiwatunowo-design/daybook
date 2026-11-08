@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. Cloud backup skips audio + model; device-to-device transfer keeps recordings. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="recordings/" />
+        <exclude domain="file" path="vosk-model-small-id/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="vosk-model-small-id/" />
+    </device-transfer>
+</data-extraction-rules>

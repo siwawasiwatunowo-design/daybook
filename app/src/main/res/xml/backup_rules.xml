@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and below: keep large audio and the Vosk model out of Auto Backup
+     (it has a ~25 MB quota and can fail silently). Use the in-app export for real backups. -->
+<full-backup-content>
+    <exclude domain="file" path="recordings/" />
+    <exclude domain="file" path="vosk-model-small-id/" />
+</full-backup-content>

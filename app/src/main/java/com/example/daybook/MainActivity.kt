@@ -1,7 +1,10 @@
 package com.example.daybook
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.os.Build
@@ -32,6 +35,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,8 +59,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Date
+import java.util.Locale
 
 // NOTE (Phase 1): The hardcoded Gemini API key that lived here was removed for
 // security. Cloud AI (Gemini) is disabled until Phase 7, where it returns as an
@@ -343,99 +350,252 @@ fun Home(vm: VM) {
 }
 
 // ─── Recordings Tab ───────────────────────────────────────────────────────────
+//
+// UX principles (see SYSTEM_FLOW.md §6.1): during a meeting there is no spare
+// capacity to operate the app, so: one tap to start (title is automatic), a
+// minimal screen with two big Tandai buttons, Stop far away and confirmed.
+
+@Composable
+fun RecordingsScreen(vm: VM) {
+    val live by RecordingService.live.collectAsState()
+    val cur = live
+    if (cur != null) ActiveRecordingScreen(cur) else RecordingsList()
+}
+
+/** Screen shown while a recording is running: minimal, big targets, nothing to type. */
+@Composable
+fun ActiveRecordingScreen(live: LiveRecording) {
+    val context = LocalContext.current
+    var confirmStop by remember { mutableStateOf(false) }
+    LaunchedEffect(confirmStop) { if (confirmStop) { delay(3000); confirmStop = false } }
+
+    Column(
+        Modifier.fillMaxSize().padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(live.title, style = MaterialTheme.typography.titleMedium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(8.dp))
+        Text("● Merekam", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+        Text(formatClock(live.elapsedMs), style = MaterialTheme.typography.displayMedium,
+            fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+
+        // Live sound indicator: proves the mic is really capturing audio.
+        LinearProgressIndicator(progress = { live.level }, modifier = Modifier.fillMaxWidth().height(10.dp))
+        Text("Indikator suara", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+
+        live.warning?.let { w ->
+            Spacer(Modifier.height(12.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Text(w, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(
+                onClick = { markRecording(context, RecordingService.MARK_BINGUNG) },
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            ) { Text("❓\nBingung", textAlign = TextAlign.Center, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+            Button(
+                onClick = { markRecording(context, RecordingService.MARK_PENTING) },
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            ) { Text("⭐\nPenting", textAlign = TextAlign.Center, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+        }
+        Spacer(Modifier.height(8.dp))
+        val lastMs = live.lastMarkMs
+        Text(
+            if (lastMs != null) "Ditandai ${markLabel(live.lastMarkType)} di ${formatClock(lastMs)} • total ${live.markCount}"
+            else "Tap saat bingung atau ada hal penting. Tidak perlu mengetik.",
+            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.weight(1f))
+        // Small and far from Tandai; needs a second tap so it can't be hit by mistake.
+        OutlinedButton(onClick = {
+            if (confirmStop) stopRecording(context) else confirmStop = true
+        }) { Text(if (confirmStop) "Tap lagi untuk berhenti" else "Stop") }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecordingsScreen(vm: VM) {
+fun RecordingsList() {
     val context = LocalContext.current
     val recs by RecordingRepository.recordings.collectAsState()
-    var showStart by remember { mutableStateOf(false) }
-    var title by remember { mutableStateOf("") }
+    val startError by RecordingService.startError.collectAsState()
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<Recording?>(null) }
+    var deleteTarget by remember { mutableStateOf<Recording?>(null) }
+    val prefs = remember { context.getSharedPreferences("daybook_prefs", Context.MODE_PRIVATE) }
+    var tipDismissed by remember { mutableStateOf(prefs.getBoolean("battery_tip_dismissed", false)) }
 
+    // RECORD_AUDIO is required; POST_NOTIFICATIONS is requested too but NOT required
+    // (if denied, recording still runs, only the notification is hidden).
     val perms = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        if (grants[Manifest.permission.RECORD_AUDIO] == true) {
-            startRecording(context, title)
-            showStart = false; title = ""
-        }
+        if (grants[Manifest.permission.RECORD_AUDIO] == true) startRecording(context)
     }
 
     Box(Modifier.fillMaxSize()) {
-        if (recs.isEmpty()) {
-            Text("Belum ada rekaman. Tap 🎙 untuk mulai merekam.", Modifier.padding(16.dp))
-        } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
-                items(recs, key = { it.id }) { r ->
-                    val active = r.status == "RECORDING"
-                    ListItem(
-                        modifier = Modifier.clickable {
-                            expandedId = if (expandedId == r.id) null else r.id
-                        },
-                        headlineContent = { Text(r.title.ifBlank { "Meeting" }, fontWeight = FontWeight.Medium) },
-                        supportingContent = {
-                            Column {
-                                Text("${r.chunks.size} chunk • ${statusLabel(r.status)}",
-                                    style = MaterialTheme.typography.bodySmall)
-                                val transcribed = r.chunks.count { it.status == "TRANSCRIBED" }
-                                if (r.status == "PROCESSING" || r.chunks.any { it.status == "TRANSCRIBING" })
-                                    Text("Transkrip: $transcribed/${r.chunks.size} chunk",
+        LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            if (!tipDismissed) item {
+                Card(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Supaya rekaman tidak berhenti saat layar mati", fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("HP Xiaomi/POCO sering mematikan app di latar belakang. Di Info Aplikasi Daybook: " +
+                            "Penghemat baterai → \"Tanpa batasan\", aktifkan \"Mulai otomatis\" (Autostart), " +
+                            "dan kunci app di Recent Apps.", style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton({
+                                try {
+                                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.parse("package:" + context.packageName)))
+                                } catch (_: Exception) {}
+                            }) { Text("Buka pengaturan app") }
+                            TextButton({
+                                prefs.edit().putBoolean("battery_tip_dismissed", true).apply()
+                                tipDismissed = true
+                            }) { Text("Sudah diatur") }
+                        }
+                    }
+                }
+            }
+            startError?.let { err ->
+                item {
+                    Card(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(err, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
+                            TextButton({ RecordingService.clearStartError() }) { Text("Tutup") }
+                        }
+                    }
+                }
+            }
+            if (recs.isEmpty()) item {
+                Text("Belum ada rekaman. Tap 🎙 untuk mulai merekam.", Modifier.padding(16.dp))
+            }
+            items(recs, key = { it.id }) { r ->
+                val expanded = expandedId == r.id
+                val total = r.chunks.sumOf { it.durationMs }
+                ListItem(
+                    modifier = Modifier.clickable { expandedId = if (expanded) null else r.id },
+                    headlineContent = { Text(r.title.ifBlank { "Meeting" }, fontWeight = FontWeight.Medium) },
+                    supportingContent = {
+                        Column {
+                            Text(buildString {
+                                append(formatClock(total)).append(" • ").append(statusLabel(r.status))
+                                if (r.marks.isNotEmpty()) append(" • ⭐ ").append(r.marks.size)
+                            }, style = MaterialTheme.typography.bodySmall)
+                            if (r.message.isNotBlank())
+                                Text(r.message + if (r.status == "INTERRUPTED") ". Audio sebelumnya berhasil diselamatkan." else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error)
+                            val transcribed = r.chunks.count { it.status == "TRANSCRIBED" }
+                            if (r.chunks.isNotEmpty() && r.status != "RECORDING") {
+                                when {
+                                    r.status == "DONE" -> Text("Transkrip selesai",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary)
-                                if (expandedId == r.id && r.chunks.isNotEmpty()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    r.chunks.forEach { c ->
-                                        Text("   • chunk ${c.index}: ${statusLabel(c.status)}",
+                                    r.status == "PARTIAL" -> Text("Transkrip sebagian: $transcribed/${r.chunks.size} bagian",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error)
+                                    transcribed > 0 || r.chunks.any { it.status == "TRANSCRIBING" } ->
+                                        Text("Transkrip: $transcribed/${r.chunks.size} bagian",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary)
+                                    else -> Text("Transkrip belum tersedia",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            if (expanded) {
+                                Spacer(Modifier.height(4.dp))
+                                if (r.marks.isNotEmpty()) {
+                                    Text("Penanda", style = MaterialTheme.typography.labelMedium)
+                                    r.marks.forEach { m ->
+                                        Text("   ${markLabel(m.type)} • ${formatClock(m.offsetMs)}",
                                             style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                }
+                                r.chunks.forEach { c ->
+                                    Text("   • bagian ${c.index}: ${formatClock(c.durationMs)} • ${statusLabel(c.status)}",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                                val size = remember(r.id, r.chunks.size) { RecordingRepository.diskBytes(r.id) }
+                                Text("Ukuran audio: ${formatSize(size)}", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row {
+                                    TextButton({ renameTarget = r }) { Text("Ganti judul") }
+                                    TextButton({ deleteTarget = r }) {
+                                        Text("Hapus", color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
-                        },
-                        trailingContent = {
-                            when {
-                                active -> Button(onClick = { stopRecording(context) }) { Text("Stop") }
-                                r.mom.isNotBlank() -> Text("MoM ✓", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary)
-                            }
                         }
-                    )
-                    HorizontalDivider()
-                }
+                    },
+                    trailingContent = {
+                        if (r.mom.isNotBlank()) Text("MoM ✓", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                )
+                HorizontalDivider()
             }
         }
 
         FloatingActionButton(
-            onClick = { showStart = true },
+            onClick = {
+                // One tap: no title dialog. Title is automatic and can be renamed afterwards.
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED) startRecording(context)
+                else perms.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
+            },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
         ) { Icon(Icons.Default.Mic, "Rekam") }
     }
 
-    if (showStart) {
+    renameTarget?.let { r ->
+        var text by remember(r.id) { mutableStateOf(r.title) }
         AlertDialog(
-            onDismissRequest = { showStart = false; title = "" },
-            title = { Text("Mulai Rekaman") },
-            text = {
-                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(),
-                    label = { Text("Judul (opsional)" ) }, singleLine = true)
-            },
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Ganti judul") },
+            text = { OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true) },
             confirmButton = {
-                Button(onClick = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED) {
-                        startRecording(context, title)
-                        showStart = false; title = ""
-                    } else {
-                        perms.launch(arrayOf(
-                            Manifest.permission.RECORD_AUDIO,
-                            Manifest.permission.POST_NOTIFICATIONS
-                        ))
-                    }
-                }) { Text("Mulai") }
+                Button({ RecordingRepository.rename(r.id, text); renameTarget = null }) { Text("Simpan") }
             },
-            dismissButton = { TextButton({ showStart = false; title = "" }) { Text("Batal") } }
+            dismissButton = { TextButton({ renameTarget = null }) { Text("Batal") } }
         )
     }
+    deleteTarget?.let { r ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Hapus rekaman?") },
+            text = { Text("\"${r.title}\" dan semua audionya (${formatSize(RecordingRepository.diskBytes(r.id))}) " +
+                "akan dihapus dari HP ini. Tidak bisa dibatalkan.") },
+            confirmButton = {
+                Button({
+                    val id = r.id
+                    Thread { RecordingRepository.remove(id) }.start()
+                    deleteTarget = null; expandedId = null
+                }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Hapus") }
+            },
+            dismissButton = { TextButton({ deleteTarget = null }) { Text("Batal") } }
+        )
+    }
+}
+
+private fun markLabel(type: String?): String = when (type) {
+    RecordingService.MARK_BINGUNG -> "❓ Bingung"
+    RecordingService.MARK_PENTING -> "⭐ Penting"
+    else -> "⭐ Penanda"
 }
 
 private fun statusLabel(s: String): String = when (s) {
@@ -443,27 +603,44 @@ private fun statusLabel(s: String): String = when (s) {
     "RECORDED" -> "tersimpan"
     "TRANSCRIBING" -> "mentranskrip…"
     "TRANSCRIBED" -> "transkrip ✓"
-    "PROCESSING" -> "memproses"
+    "PROCESSING" -> "audio tersimpan"
+    "INTERRUPTED" -> "terputus"
+    "PARTIAL" -> "sebagian"
     "DONE" -> "selesai"
     "FAILED" -> "gagal"
     else -> s
 }
 
-/** Starts the foreground recording service for a new session. */
-private fun startRecording(context: android.content.Context, title: String) {
+/** Starts the foreground recording service for a new session (title is automatic). */
+private fun startRecording(context: Context) {
     val id = System.currentTimeMillis().toString()
+    val title = "Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date())
+    RecordingService.clearStartError()
     val intent = Intent(context, RecordingService::class.java).apply {
         action = RecordingService.ACTION_START
         putExtra(RecordingService.EXTRA_ID, id)
-        putExtra(RecordingService.EXTRA_TITLE, title.ifBlank { "Meeting" })
+        putExtra(RecordingService.EXTRA_TITLE, title)
     }
     ContextCompat.startForegroundService(context, intent)
 }
 
-/** Stops the foreground recording service. */
-private fun stopRecording(context: android.content.Context) {
-    val intent = Intent(context, RecordingService::class.java).apply { action = RecordingService.ACTION_STOP }
-    ContextCompat.startForegroundService(context, intent)
+/**
+ * Stop / mark are sent with plain startService() (the app is visible when the user
+ * taps them). startForegroundService() here would obligate the service to call
+ * startForeground() within ~5 s and crash if the service was already gone.
+ */
+private fun stopRecording(context: Context) = sendToService(context, RecordingService.ACTION_STOP, null)
+
+private fun markRecording(context: Context, type: String) =
+    sendToService(context, RecordingService.ACTION_MARK, type)
+
+private fun sendToService(context: Context, action: String, markType: String?) {
+    try {
+        context.startService(Intent(context, RecordingService::class.java).apply {
+            this.action = action
+            if (markType != null) putExtra(RecordingService.EXTRA_MARK_TYPE, markType)
+        })
+    } catch (_: Exception) { /* app not in foreground: ignore */ }
 }
 
 // ─── Section Screen ──────────────────────────────────────────────────────────
@@ -592,15 +769,7 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
     val recordingResult by vm.recordingResult.collectAsState()
     var showColorPicker by remember { mutableStateOf(false) }
     var showAiSheet by remember { mutableStateOf(false) }
-    var showRecordDialog by remember { mutableStateOf(false) }
     var currentEntryId by remember { mutableStateOf(entry.id) }
-
-    // Permission launcher
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) showRecordDialog = true
-    }
 
     LaunchedEffect(entry.id) {
         if (entry.body.isNotBlank()) richState.setHtml(entry.body)
@@ -654,23 +823,8 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
                             else             -> MaterialTheme.colorScheme.onSurfaceVariant
                         }, modifier = Modifier.padding(end = 4.dp))
 
-                    // Record button
-                    IconButton(onClick = {
-                        when {
-                            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                                == PackageManager.PERMISSION_GRANTED -> showRecordDialog = true
-                            else -> permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    }) {
-                        Icon(
-                            if (recordState == RecordState.RECORDING) Icons.Default.Stop
-                            else Icons.Default.Mic,
-                            contentDescription = "Record",
-                            tint = if (recordState == RecordState.RECORDING)
-                                MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    // Mic button removed: recording now lives only in the Rekam tab
+                    // (single recording path, see SYSTEM_FLOW.md §2).
 
                     // AI Review button
                     IconButton(
@@ -729,18 +883,6 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
                 placeholder = { Text("Start writing...", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             )
         }
-    }
-
-    // ── Recording Dialog ───────────────────────────────────────────────────
-    if (showRecordDialog) {
-        RecordingDialog(
-            recordState   = recordState,
-            recordSeconds = recordSeconds,
-            noteTitle     = title,
-            onStart       = { vm.startRecording(context) },
-            onStop        = { vm.stopRecording(title) ; showRecordDialog = false },
-            onCancel      = { vm.cancelRecording(); showRecordDialog = false }
-        )
     }
 
     // ── AI Review Sheet ────────────────────────────────────────────────────

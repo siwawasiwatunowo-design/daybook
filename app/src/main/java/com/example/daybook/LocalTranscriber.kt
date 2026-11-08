@@ -1,6 +1,9 @@
 package com.example.daybook
 
 import android.content.Context
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -8,20 +11,18 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
-import org.vosk.Model
-import org.vosk.Recognizer
 
 /**
  * Offline speech-to-text using Vosk (local, on-device). No audio/teks is sent
  * to the cloud by this class.
  *
- * Recordings are 16kHz mono 16-bit WAV (see VM.startRecording), so we feed the
- * PCM data straight to the recognizer with no decoding/resampling step.
+ * Recordings are 16kHz mono 16-bit (see RecordingService), so PCM is fed
+ * straight to the recognizer with no decoding/resampling step.
  *
- * The Indonesian model (vosk-model-small-id) is downloaded once on first use
- * (~40MB) and cached in filesDir. Accuracy is POC-grade; the goal is reliable
- * offline transcription, not perfection.
+ * Output is TIMED (§7): a list of segments {startMs, endMs, text} via
+ * Recognizer.setWords(true), so the result screen can show a timeline and
+ * jump to moments. The Indonesian model (vosk-model-small-id) is downloaded
+ * once on first use (~40MB) and cached in filesDir. Accuracy is POC-grade.
  */
 object LocalTranscriber {
     private const val MODEL_DIR_NAME = "vosk-model-small-id"
@@ -60,9 +61,8 @@ object LocalTranscriber {
             var entry = zis.nextEntry
             while (entry != null) {
                 val outFile = File(destDir, entry.name)
-                if (entry.isDirectory) {
-                    outFile.mkdirs()
-                } else {
+                if (entry.isDirectory) outFile.mkdirs()
+                else {
                     outFile.parentFile?.mkdirs()
                     FileOutputStream(outFile).use { zis.copyTo(it) }
                 }
@@ -73,34 +73,50 @@ object LocalTranscriber {
     }
 
     /**
-     * Transcribe a 16kHz mono 16-bit WAV file to text. Runs on the calling
-     * thread (caller must use Dispatchers.IO). Throws on failure.
+     * Transcribe a 16kHz mono 16-bit WAV file into timed segments. The model is
+     * loaded once by the caller (SttWorker) and reused across chunks. Throws on
+     * failure; the caller marks the chunk FAILED and continues. (§7)
      */
-    fun transcribe(context: Context, wavFile: File): String {
-        val modelDir = ensureModel(context)
-        val model = Model(modelDir.absolutePath)
+    fun transcribeTimed(model: Model, wavFile: File): List<TimedSegment> {
         val recognizer = Recognizer(model, 16000.0f)
+        recognizer.setWords(true)
         try {
             FileInputStream(wavFile).use { fis ->
-                // Skip the 44-byte WAV header we wrote in VM.startRecording.
-                val header = ByteArray(44)
-                fis.read(header)
+                fis.skip(WavIO.HEADER_SIZE.toLong()) // skip the 44-byte WAV header
                 val buffer = ByteArray(8192)
-                val sb = StringBuilder()
+                val segments = mutableListOf<TimedSegment>()
                 while (true) {
                     val n = fis.read(buffer)
                     if (n < 0) break
                     if (recognizer.acceptWaveForm(buffer, n)) {
-                        val seg = JSONObject(recognizer.result).optString("text", "")
-                        if (seg.isNotBlank()) sb.append(seg).append(' ')
+                        addUtterance(JSONObject(recognizer.result), segments)
                     }
                 }
-                val finalText = JSONObject(recognizer.finalResult).optString("text", "")
-                if (finalText.isNotBlank()) sb.append(finalText).append(' ')
-                return sb.toString().trim()
+                addUtterance(JSONObject(recognizer.finalResult), segments)
+                return segments
             }
         } finally {
             recognizer.close()
+        }
+    }
+
+    private fun addUtterance(res: JSONObject, out: MutableList<TimedSegment>) {
+        val text = res.optString("text", "").trim()
+        if (text.isEmpty()) return
+        val arr = res.optJSONArray("result") ?: return
+        if (arr.length() == 0) return
+        val start = arr.optJSONObject(0)?.optDouble("start", 0.0) ?: 0.0
+        val end = arr.optJSONObject(arr.length() - 1)?.optDouble("end", 0.0) ?: 0.0
+        out.add(TimedSegment((start * 1000).toLong(), (end * 1000).toLong(), text))
+    }
+
+    /** Convenience: plain-text transcript (loads model internally). */
+    fun transcribe(context: Context, wavFile: File): String {
+        val modelDir = ensureModel(context)
+        val model = Model(modelDir.absolutePath)
+        return try {
+            transcribeTimed(model, wavFile).joinToString(" ") { it.text }
+        } finally {
             model.close()
         }
     }
