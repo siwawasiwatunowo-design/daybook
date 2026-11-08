@@ -13,11 +13,11 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import org.vosk.Model
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
 
 /**
  * Sequential STT worker (§7). One worker per recording (beginUniqueWork KEEP),
- * Vosk model loaded ONCE and reused across chunks. Chunks are transcribed in
+ * Whisper recognizer created ONCE and reused across chunks. Chunks are transcribed in
  * order; a failed chunk is marked FAILED and the worker continues with the
  * next (audio is never lost). setForeground keeps the system from killing it
  * after ~10 minutes.
@@ -43,7 +43,12 @@ class SttWorker(
             return Result.retry()
         }
 
-        val model = Model(modelDir.absolutePath)
+        val recognizer: OfflineRecognizer = try {
+            LocalTranscriber.createRecognizer(modelDir)
+        } catch (e: Throwable) {
+            RecordingRepository.update(id) { it.copy(status = "FAILED", message = "Gagal memuat model STT: ${e.message}") }
+            return Result.failure()
+        }
         try {
             var ok = false
             var fail = false
@@ -53,7 +58,7 @@ class SttWorker(
                 setForeground(foregroundInfo("Mentranskrip chunk ${chunk.index}/${rec.chunks.size}"))
                 try {
                     val wav = RecordingRepository.chunkFile(id, chunk.fileName)
-                    val segs = LocalTranscriber.transcribeTimed(model, wav)
+                    val segs = LocalTranscriber.transcribeTimed(recognizer, wav)
                     val text = segs.joinToString(" ") { it.text }
                     RecordingRepository.updateChunk(id, chunk.index) {
                         it.copy(segments = segs, transcript = text, status = "TRANSCRIBED")
@@ -72,7 +77,7 @@ class SttWorker(
             RecordingRepository.update(id) { it.copy(status = status) }
             return Result.success()
         } finally {
-            model.close()
+            recognizer.release()
         }
     }
 

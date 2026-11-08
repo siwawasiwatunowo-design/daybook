@@ -1,123 +1,194 @@
 package com.example.daybook
 
 import android.content.Context
-import org.json.JSONObject
-import org.vosk.Model
-import org.vosk.Recognizer
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
- * Offline speech-to-text using Vosk (local, on-device). No audio/teks is sent
- * to the cloud by this class.
+ * Offline speech-to-text using Whisper (multilingual "base", int8) via
+ * sherpa-onnx. Runs fully on-device; no audio/text is sent to the cloud by
+ * this class.
  *
- * Recordings are 16kHz mono 16-bit (see RecordingService), so PCM is fed
- * straight to the recognizer with no decoding/resampling step.
+ * Recordings are 16kHz mono 16-bit (see RecordingService). Whisper decodes at
+ * most ~30 s per call, so each chunk (~10 min) is cut into <=25 s windows,
+ * preferring to cut at the quietest moment near the end of a window so words
+ * are not split. Whisper gives no reliable word timestamps, so each window
+ * becomes one TimedSegment {startMs, endMs, text} (§7) — coarse, but enough to
+ * jump to moments in the result screen.
  *
- * Output is TIMED (§7): a list of segments {startMs, endMs, text} via
- * Recognizer.setWords(true), so the result screen can show a timeline and
- * jump to moments. The Indonesian model (vosk-model-small-id) is downloaded
- * once on first use (~40MB) and cached in filesDir. Accuracy is POC-grade.
+ * The model (~160 MB: encoder + decoder + tokens) is downloaded once on first
+ * use from Hugging Face and cached in filesDir.
  */
 object LocalTranscriber {
-    private const val MODEL_DIR_NAME = "vosk-model-small-id"
-    private const val MODEL_ZIP_FOLDER = "vosk-model-small-id-0.4"
-    private const val MODEL_URL =
-        "https://alphacephei.com/vosk/models/vosk-model-small-id-0.4.zip"
+    private const val MODEL_DIR_NAME = "whisper-base-int8"
+    private const val BASE_URL =
+        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/"
+    private const val ENCODER = "base-encoder.int8.onnx"
+    private const val DECODER = "base-decoder.int8.onnx"
+    private const val TOKENS = "base-tokens.txt"
+    private const val DONE_MARKER = ".complete"
+    private const val LANGUAGE = "id"
 
-    /** Ensure the Vosk model is present on disk, downloading once if needed. */
+    private const val SR = 16000
+    private const val WINDOW_SAMPLES = 25 * SR       // < Whisper's 30 s limit
+    private const val MIN_WINDOW_SAMPLES = 10 * SR   // never cut before this
+    private const val FRAME_SAMPLES = SR / 5         // 200 ms frames for pause search
+    private const val SILENT_RMS = 0.002f            // skip silent windows (avoids Whisper hallucinations)
+
+    /** Ensure the Whisper model is present on disk, downloading once if needed. */
     fun ensureModel(context: Context): File {
         val dir = File(context.filesDir, MODEL_DIR_NAME)
-        if (dir.exists() && File(dir, "conf").exists()) return dir
-        dir.parentFile?.mkdirs()
+        if (File(dir, DONE_MARKER).exists()) return dir
 
+        // Old Vosk model is no longer used; free the space.
+        File(context.filesDir, "vosk-model-small-id").deleteRecursively()
+        File(context.filesDir, "vosk-model-small-id-0.4").deleteRecursively()
+
+        dir.mkdirs()
         val client = OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS).build()
-        val req = Request.Builder().url(MODEL_URL).build()
-        val tmpZip = File(context.cacheDir, "vosk-model.zip")
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw Exception("Download model gagal: HTTP ${resp.code}")
-            resp.body?.byteStream()?.use { input ->
-                FileOutputStream(tmpZip).use { input.copyTo(it) }
-            } ?: throw Exception("Response body kosong")
-        }
-        unzip(tmpZip, context.filesDir)
-        tmpZip.delete()
 
-        val extracted = File(context.filesDir, MODEL_ZIP_FOLDER)
-        if (extracted.exists() && !dir.exists()) extracted.renameTo(dir)
-        if (!dir.exists()) throw Exception("Model gagal diekstrak")
+        // Files that finished earlier are kept, so a retry resumes at the next file.
+        for (name in listOf(TOKENS, ENCODER, DECODER)) {
+            val target = File(dir, name)
+            if (target.exists() && target.length() > 0) continue
+            download(client, BASE_URL + name, target)
+        }
+        File(dir, DONE_MARKER).writeText("ok")
         return dir
     }
 
-    private fun unzip(zipFile: File, destDir: File) {
-        ZipInputStream(FileInputStream(zipFile)).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                val outFile = File(destDir, entry.name)
-                if (entry.isDirectory) outFile.mkdirs()
-                else {
-                    outFile.parentFile?.mkdirs()
-                    FileOutputStream(outFile).use { zis.copyTo(it) }
-                }
-                zis.closeEntry()
-                entry = zis.nextEntry
+    private fun download(client: OkHttpClient, url: String, target: File) {
+        val tmp = File(target.parentFile, target.name + ".part")
+        val req = Request.Builder().url(url).build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw Exception("Download model gagal: HTTP ${resp.code} ($url)")
+            val body = resp.body ?: throw Exception("Response body kosong")
+            val expected = body.contentLength()
+            body.byteStream().use { input ->
+                FileOutputStream(tmp).use { input.copyTo(it) }
+            }
+            if (expected > 0 && tmp.length() != expected) {
+                tmp.delete()
+                throw Exception("Download tidak lengkap: ${target.name}")
             }
         }
+        if (!tmp.renameTo(target)) throw Exception("Gagal menyimpan ${target.name}")
+    }
+
+    /** Create the recognizer once (SttWorker) and reuse it across chunks. Call release() when done. */
+    fun createRecognizer(modelDir: File): OfflineRecognizer {
+        val config = OfflineRecognizerConfig(
+            featConfig = FeatureConfig(sampleRate = SR, featureDim = 80),
+            modelConfig = OfflineModelConfig(
+                whisper = OfflineWhisperModelConfig(
+                    encoder = File(modelDir, ENCODER).absolutePath,
+                    decoder = File(modelDir, DECODER).absolutePath,
+                    language = LANGUAGE,
+                    task = "transcribe"
+                ),
+                tokens = File(modelDir, TOKENS).absolutePath,
+                numThreads = 2,
+                debug = false,
+                provider = "cpu"
+            )
+        )
+        return OfflineRecognizer(config = config)
     }
 
     /**
-     * Transcribe a 16kHz mono 16-bit WAV file into timed segments. The model is
-     * loaded once by the caller (SttWorker) and reused across chunks. Throws on
+     * Transcribe a 16kHz mono 16-bit WAV file into timed segments. The recognizer is
+     * created once by the caller (SttWorker) and reused across chunks. Throws on
      * failure; the caller marks the chunk FAILED and continues. (§7)
      */
-    fun transcribeTimed(model: Model, wavFile: File): List<TimedSegment> {
-        val recognizer = Recognizer(model, 16000.0f)
-        recognizer.setWords(true)
-        try {
-            FileInputStream(wavFile).use { fis ->
-                fis.skip(WavIO.HEADER_SIZE.toLong()) // skip the 44-byte WAV header
-                val buffer = ByteArray(8192)
-                val segments = mutableListOf<TimedSegment>()
-                while (true) {
-                    val n = fis.read(buffer)
-                    if (n < 0) break
-                    if (recognizer.acceptWaveForm(buffer, n)) {
-                        addUtterance(JSONObject(recognizer.result), segments)
-                    }
+    fun transcribeTimed(recognizer: OfflineRecognizer, wavFile: File): List<TimedSegment> {
+        val pcm = readPcm(wavFile)
+        val segments = mutableListOf<TimedSegment>()
+        var start = 0
+        while (start < pcm.size) {
+            var end = minOf(start + WINDOW_SAMPLES, pcm.size)
+            if (end < pcm.size) end = findQuietCut(pcm, start, end)
+
+            val samples = FloatArray(end - start) { pcm[start + it] / 32768f }
+            if (rms(samples) >= SILENT_RMS) {
+                val text = decode(recognizer, samples).trim()
+                if (text.isNotEmpty()) {
+                    segments.add(TimedSegment(start * 1000L / SR, end * 1000L / SR, text))
                 }
-                addUtterance(JSONObject(recognizer.finalResult), segments)
-                return segments
             }
+            start = end
+        }
+        return segments
+    }
+
+    private fun decode(recognizer: OfflineRecognizer, samples: FloatArray): String {
+        val stream = recognizer.createStream()
+        try {
+            stream.acceptWaveform(samples, SR)
+            recognizer.decode(stream)
+            return recognizer.getResult(stream).text
         } finally {
-            recognizer.close()
+            stream.release()
         }
     }
 
-    private fun addUtterance(res: JSONObject, out: MutableList<TimedSegment>) {
-        val text = res.optString("text", "").trim()
-        if (text.isEmpty()) return
-        val arr = res.optJSONArray("result") ?: return
-        if (arr.length() == 0) return
-        val start = arr.optJSONObject(0)?.optDouble("start", 0.0) ?: 0.0
-        val end = arr.optJSONObject(arr.length() - 1)?.optDouble("end", 0.0) ?: 0.0
-        out.add(TimedSegment((start * 1000).toLong(), (end * 1000).toLong(), text))
+    /** Cut point = centre of the quietest 200 ms frame in the tail of the window. */
+    private fun findQuietCut(pcm: ShortArray, start: Int, end: Int): Int {
+        val from = maxOf(start + MIN_WINDOW_SAMPLES, end - 5 * SR)
+        var bestPos = end
+        var bestEnergy = Long.MAX_VALUE
+        var pos = from
+        while (pos + FRAME_SAMPLES <= end) {
+            var e = 0L
+            for (i in pos until pos + FRAME_SAMPLES) e += abs(pcm[i].toInt())
+            if (e < bestEnergy) {
+                bestEnergy = e
+                bestPos = pos + FRAME_SAMPLES / 2
+            }
+            pos += FRAME_SAMPLES
+        }
+        return if (bestPos > start) bestPos else end
+    }
+
+    private fun rms(x: FloatArray): Float {
+        if (x.isEmpty()) return 0f
+        var s = 0.0
+        for (v in x) s += v * v
+        return sqrt(s / x.size).toFloat()
+    }
+
+    /** Read the 16-bit little-endian PCM payload (skips the 44-byte WAV header). */
+    private fun readPcm(wavFile: File): ShortArray {
+        val bytes = FileInputStream(wavFile).use { fis ->
+            fis.skip(WavIO.HEADER_SIZE.toLong())
+            fis.readBytes()
+        }
+        val out = ShortArray(bytes.size / 2)
+        for (i in out.indices) {
+            out[i] = ((bytes[2 * i].toInt() and 0xFF) or (bytes[2 * i + 1].toInt() shl 8)).toShort()
+        }
+        return out
     }
 
     /** Convenience: plain-text transcript (loads model internally). */
     fun transcribe(context: Context, wavFile: File): String {
-        val modelDir = ensureModel(context)
-        val model = Model(modelDir.absolutePath)
+        val recognizer = createRecognizer(ensureModel(context))
         return try {
-            transcribeTimed(model, wavFile).joinToString(" ") { it.text }
+            transcribeTimed(recognizer, wavFile).joinToString(" ") { it.text }
         } finally {
-            model.close()
+            recognizer.release()
         }
     }
 }
