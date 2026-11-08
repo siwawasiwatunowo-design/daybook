@@ -383,7 +383,14 @@ class RecordingService : Service() {
                     message = if (interrupted) "Rekaman terputus di menit $minutes: $endReason" else r.message
                 )
             }
-            val hasAudio = RecordingRepository.get(recordingId)?.chunks?.isNotEmpty() == true
+            val finalizedRecording = RecordingRepository.get(recordingId)
+            if (finalizedRecording != null) {
+                try { PublicRecordingExporter.exportRecording(applicationContext, finalizedRecording) }
+                catch (_: Exception) {
+                    // Private source audio remains intact; a later recovery/export can retry.
+                }
+            }
+            val hasAudio = finalizedRecording?.chunks?.isNotEmpty() == true
             if (hasAudio && AUTO_TRANSCRIBE) {
                 try { SttWorker.enqueue(applicationContext, recordingId) } catch (_: Exception) {}
             }

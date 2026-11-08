@@ -127,6 +127,7 @@ object RecordingRepository {
         update(id) { rec ->
             rec.copy(chunks = rec.chunks.map { if (it.index == index) block(it) else it })
         }
+        get(id)?.let { rec -> try { PublicRecordingExporter.exportTextAssets(appContext, rec) } catch (_: Exception) {} }
     }
 
     @Synchronized fun setChunkStatus(id: String, index: Int, status: String) {
@@ -135,6 +136,7 @@ object RecordingRepository {
 
     @Synchronized fun addChunk(id: String, chunk: Chunk) {
         update(id) { rec -> rec.copy(chunks = rec.chunks + chunk) }
+        get(id)?.let { rec -> try { PublicRecordingExporter.exportTextAssets(appContext, rec) } catch (_: Exception) {} }
     }
 
     @Synchronized fun addMark(id: String, mark: Mark) {
@@ -149,6 +151,7 @@ object RecordingRepository {
 
     fun rename(id: String, title: String) {
         update(id) { it.copy(title = title.trim().ifBlank { it.title }) }
+        get(id)?.let { rec -> try { PublicRecordingExporter.exportTextAssets(appContext, rec) } catch (_: Exception) {} }
     }
 
     /** Total bytes of audio files on disk for a recording. */
@@ -157,9 +160,11 @@ object RecordingRepository {
 
     @Synchronized fun setMom(id: String, momJson: String) {
         update(id) { it.copy(mom = momJson) }
+        get(id)?.let { rec -> try { PublicRecordingExporter.exportTextAssets(appContext, rec) } catch (_: Exception) {} }
     }
 
     @Synchronized fun remove(id: String) {
+        try { PublicRecordingExporter.deleteRecording(appContext, id) } catch (_: Exception) {}
         _recordings.value = _recordings.value.filterNot { it.id == id }
         dir(id).deleteRecursively()
         save()
@@ -227,7 +232,12 @@ object RecordingRepository {
                                   else "Rekaman terputus di menit $minutes"
                     )
                 }
-                if (wavs.isNotEmpty()) salvaged.add(rec.id)
+                if (wavs.isNotEmpty()) {
+                    salvaged.add(rec.id)
+                    get(rec.id)?.let { recovered ->
+                        try { PublicRecordingExporter.exportRecording(appContext, recovered) } catch (_: Exception) {}
+                    }
+                }
             } catch (_: Exception) { /* best effort per recording */ }
         }
         if (RecordingService.activeId == null) { _activeId.value = null; clearLevel() }
