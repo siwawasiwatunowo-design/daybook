@@ -1,12 +1,13 @@
-val daybookApiBaseUrl = providers.gradleProperty("daybookApiBaseUrl")
-    .orElse("http://10.0.2.2:5000/").get()
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
 }
+
+val daybookApiBaseUrl = providers.gradleProperty("daybookApiBaseUrl")
+    .orElse("http://10.0.2.2:5000/").get()
+
 android {
     namespace = "com.example.daybook"
     compileSdk = 35
