@@ -57,6 +57,7 @@ data class Recording(
     val backendUploadComplete: Boolean = false,
     val backendRawTranscript: String = "",
     val backendRefinedTranscript: String = "",
+    val backendSegmentsJson: String = "",
     val backendMomJson: String = "",
     val backendMessage: String = ""
 )
@@ -310,6 +311,7 @@ object RecordingRepository {
                     .put("backendUploadComplete", r.backendUploadComplete)
                     .put("backendRawTranscript", r.backendRawTranscript)
                     .put("backendRefinedTranscript", r.backendRefinedTranscript)
+                    .put("backendSegmentsJson", r.backendSegmentsJson)
                     .put("backendMomJson", r.backendMomJson)
                     .put("backendMessage", r.backendMessage))
             }
@@ -379,6 +381,7 @@ object RecordingRepository {
                     o.optBoolean("backendUploadComplete", false),
                     o.optString("backendRawTranscript", ""),
                     o.optString("backendRefinedTranscript", ""),
+                    o.optString("backendSegmentsJson", ""),
                     o.optString("backendMomJson", ""),
                     o.optString("backendMessage", "")
                 ))
