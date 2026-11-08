@@ -56,8 +56,9 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     }
     val hasText = segs.isNotEmpty() || fallback.isNotBlank()
     val title = rec.title.ifBlank { "Meeting" }
-    val failed = rec.chunks.filter { it.status == "FAILED" }
-    val pending = rec.chunks.filter { it.status != "TRANSCRIBED" && it.status != "FAILED" }
+    val failed = if (backendTranscript.isNotBlank()) emptyList() else rec.chunks.filter { it.status == "FAILED" }
+    val pending = if (backendTranscript.isNotBlank()) emptyList() else
+        rec.chunks.filter { it.status != "TRANSCRIBED" && it.status != "FAILED" }
 
     var showSaveDialog by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
