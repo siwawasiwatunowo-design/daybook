@@ -1,3 +1,6 @@
+val daybookApiBaseUrl = providers.gradleProperty("daybookApiBaseUrl")
+    .orElse("http://10.0.2.2:5000/").get()
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,11 +16,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "DAYBOOK_API_BASE_URL", "\"$daybookApiBaseUrl\"")
     }
     buildFeatures { compose = true; buildConfig = true }
-    val backendBaseUrl = providers.gradleProperty("daybookApiBaseUrl")
-        .orElse("http://10.0.2.2:5000/").get()
-    defaultConfig { buildConfigField("String", "DAYBOOK_API_BASE_URL", "\"$backendBaseUrl\"") }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

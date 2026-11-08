@@ -14,7 +14,7 @@ KT_DIR="$ROOT/app/src/main/java/com/k2fsa/sherpa/onnx"
 # 1) Native libs (release tarball contains a top-level jniLibs/ folder)
 if [ ! -f "$JNI_DIR/arm64-v8a/libsherpa-onnx-jni.so" ]; then
   tmp="$(mktemp -d)"
-  curl -fSL -o "$tmp/android.tar.bz2" \
+  curl --retry 5 --retry-all-errors --retry-delay 5 -fSL -o "$tmp/android.tar.bz2" \
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${VER}/sherpa-onnx-v${VER}-android.tar.bz2"
   tar xjf "$tmp/android.tar.bz2" -C "$tmp"
   mkdir -p "$JNI_DIR"
@@ -30,7 +30,7 @@ BASE="https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v${VER}/sherpa-onnx/k
 
 fetch_kt() {  # $1 = file base name; returns non-zero if download fails or is not Kotlin source
   local out="$KT_DIR/$1.kt"
-  curl -fSL -o "$out" "$BASE/$1.kt" 2>/dev/null || { rm -f "$out"; return 1; }
+  curl --retry 5 --retry-all-errors --retry-delay 5 -fSL -o "$out" "$BASE/$1.kt" 2>/dev/null || { rm -f "$out"; return 1; }
   if ! grep -q '^package com.k2fsa.sherpa.onnx' "$out"; then
     echo "ERROR: $1.kt is not Kotlin source (first line: $(head -n 1 "$out"))" >&2
     rm -f "$out"
