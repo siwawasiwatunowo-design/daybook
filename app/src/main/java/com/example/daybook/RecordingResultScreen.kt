@@ -47,8 +47,13 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     LaunchedEffect(rec == null) { if (rec == null) onClose() }
     if (rec == null) return
 
-    val segs = remember(rec) { RecordingRepository.combinedSegments(recordingId) }
-    val fallback = remember(rec) { RecordingRepository.fullTranscript(recordingId) }
+    val backendTranscript = rec.backendRefinedTranscript.ifBlank { rec.backendRawTranscript }
+    val segs = remember(rec) {
+        if (backendTranscript.isNotBlank()) emptyList() else RecordingRepository.combinedSegments(recordingId)
+    }
+    val fallback = remember(rec) {
+        backendTranscript.ifBlank { RecordingRepository.fullTranscript(recordingId) }
+    }
     val hasText = segs.isNotEmpty() || fallback.isNotBlank()
     val title = rec.title.ifBlank { "Meeting" }
     val failed = rec.chunks.filter { it.status == "FAILED" }
@@ -133,12 +138,28 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         }
 
         Text(
-            "Transkrip otomatis (Whisper, offline) — bisa ada salah dengar, terutama nama dan istilah teknis. " +
-                "Ketuk satu baris untuk memutar audio dari momen itu.",
+            if (backendTranscript.isNotBlank())
+                "Transkrip utama dari backend (Groq Whisper + refinement). Audio asli tetap tersimpan di perangkat."
+            else
+                "Transkrip otomatis (Sherpa ONNX, offline) — bisa ada salah dengar, terutama nama dan istilah teknis. Ketuk satu baris untuk memutar audio dari momen itu.",
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (rec.backendMomJson.isNotBlank()) {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("MoM dari backend", fontWeight = FontWeight.SemiBold)
+                    Text(rec.backendMomJson, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (rec.backendMessage.isNotBlank()) {
+            Text("Catatan backend: " + rec.backendMessage,
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
+        }
         HorizontalDivider()
 
         LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {

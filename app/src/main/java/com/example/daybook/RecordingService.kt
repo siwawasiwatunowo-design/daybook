@@ -194,7 +194,8 @@ class RecordingService : Service() {
         activeId = recordingId
         RecordingRepository.setActive(recordingId)
         RecordingRepository.upsert(
-            Recording(recordingId, title, System.currentTimeMillis(), recordingId, "RECORDING")
+            Recording(recordingId, title, System.currentTimeMillis(), recordingId, "RECORDING",
+                backendOptIn = BackendSyncPreferences.isEnabled(this))
         )
         acquireWakeLock()
         _live.value = LiveRecording(recordingId, title)
@@ -391,7 +392,10 @@ class RecordingService : Service() {
                 }
             }
             val hasAudio = finalizedRecording?.chunks?.isNotEmpty() == true
-            if (hasAudio && AUTO_TRANSCRIBE) {
+            if (hasAudio && finalizedRecording?.backendOptIn == true) {
+                try { BackendUploadWorker.enqueue(applicationContext, recordingId) }
+                catch (_: Exception) { SttWorker.enqueue(applicationContext, recordingId) }
+            } else if (hasAudio && AUTO_TRANSCRIBE) {
                 try { SttWorker.enqueue(applicationContext, recordingId) } catch (_: Exception) {}
             }
             activeId = null

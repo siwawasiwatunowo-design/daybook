@@ -17,7 +17,11 @@ class DaybookApp : Application() {
         Thread {
             try {
                 RecordingRepository.recoverInterrupted().forEach { id ->
-                    if (RecordingService.AUTO_TRANSCRIBE) SttWorker.enqueue(applicationContext, id)
+                    val recovered = RecordingRepository.get(id)
+                    if (recovered?.backendOptIn == true)
+                        BackendUploadWorker.enqueue(applicationContext, id)
+                    else if (RecordingService.AUTO_TRANSCRIBE)
+                        SttWorker.enqueue(applicationContext, id)
                 }
             } catch (_: Exception) { /* best effort */ }
         }.start()

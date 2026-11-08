@@ -75,6 +75,43 @@ object WavIO {
         return wav
     }
 
+    /** Merge WAV chunks by copying PCM payloads only, never their individual headers. */
+    fun mergeWavChunks(chunks: List<File>, destination: File): File {
+        require(chunks.isNotEmpty()) { "Tidak ada chunk audio untuk diunggah." }
+        val totalPcmBytes = chunks.sumOf { file ->
+            require(file.isFile && file.length() >= HEADER_SIZE) { "File audio tidak valid: ${file.name}" }
+            file.length() - HEADER_SIZE
+        }
+        require(totalPcmBytes <= Int.MAX_VALUE.toLong() - 36L) { "Rekaman terlalu besar untuk format WAV standar." }
+        destination.parentFile?.mkdirs()
+        val temp = File(destination.parentFile, destination.name + ".tmp")
+        try {
+            FileOutputStream(temp).use { out ->
+                writeWavHeader(out, dataLen = totalPcmBytes)
+                val buffer = ByteArray(64 * 1024)
+                chunks.forEach { chunk ->
+                    chunk.inputStream().use { input ->
+                        var skipped = 0L
+                        while (skipped < HEADER_SIZE) {
+                            val n = input.skip(HEADER_SIZE - skipped)
+                            if (n <= 0) throw java.io.IOException("Header WAV tidak lengkap: ${chunk.name}")
+                            skipped += n
+                        }
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            out.write(buffer, 0, n)
+                        }
+                    }
+                }
+                out.flush(); out.fd.sync()
+            }
+            if (destination.exists()) destination.delete()
+            if (!temp.renameTo(destination)) throw java.io.IOException("Gagal menyiapkan audio gabungan.")
+            return destination
+        } catch (e: Exception) { temp.delete(); throw e }
+    }
+
     /** Duration in ms of a 16 kHz mono 16-bit WAV (44-byte header), from file size. */
     fun durationMs(wav: File): Long =
         maxOf(0L, wav.length() - HEADER_SIZE) * 1000L / (2L * SAMPLE_RATE)

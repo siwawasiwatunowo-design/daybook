@@ -436,6 +436,7 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
     var deleteTarget by remember { mutableStateOf<Recording?>(null) }
     val prefs = remember { context.getSharedPreferences("daybook_prefs", Context.MODE_PRIVATE) }
     var tipDismissed by remember { mutableStateOf(prefs.getBoolean("battery_tip_dismissed", false)) }
+    var autoUploadEnabled by remember { mutableStateOf(BackendSyncPreferences.isEnabled(context)) }
 
     // RECORD_AUDIO is required; POST_NOTIFICATIONS is requested too but NOT required
     // (if denied, recording still runs, only the notification is hidden).
@@ -447,6 +448,29 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            item {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Proses otomatis dengan backend", fontWeight = FontWeight.Medium)
+                                Text("Rekaman baru dikirim ke Neon, lalu diproses Groq + Gemini. Audio lokal tetap disimpan.",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = autoUploadEnabled, onCheckedChange = { enabled ->
+                                autoUploadEnabled = enabled
+                                BackendSyncPreferences.setEnabled(context, enabled)
+                            })
+                        }
+                        Text(
+                            if (autoUploadEnabled) "Aktif: hanya rekaman yang dimulai setelah ini yang otomatis diunggah. Rekaman lama tidak ikut."
+                            else "Nonaktif: rekaman hanya diproses lokal di perangkat.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
             if (!tipDismissed) item {
                 Card(Modifier.fillMaxWidth().padding(12.dp)) {
                     Column(Modifier.padding(12.dp)) {
@@ -498,6 +522,10 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
                                 append(formatClock(total)).append(" • ").append(statusLabel(r.status))
                                 if (r.marks.isNotEmpty()) append(" • ⭐ ").append(r.marks.size)
                             }, style = MaterialTheme.typography.bodySmall)
+                            if (r.backendOptIn) Text("Backend: " + r.backendStatus.lowercase().replace("_", " ") +
+                                if (r.backendMessage.isNotBlank()) " • " + r.backendMessage else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary)
                             if (r.message.isNotBlank())
                                 Text(r.message + if (r.status == "INTERRUPTED") ". Audio sebelumnya berhasil diselamatkan." else "",
                                     style = MaterialTheme.typography.bodySmall,
@@ -621,7 +649,7 @@ private fun statusLabel(s: String): String = when (s) {
 
 /** Starts the foreground recording service for a new session (title is automatic). */
 private fun startRecording(context: Context) {
-    val id = System.currentTimeMillis().toString()
+    val id = java.util.UUID.randomUUID().toString()
     val title = "Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date())
     RecordingService.clearStartError()
     val intent = Intent(context, RecordingService::class.java).apply {

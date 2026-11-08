@@ -14,7 +14,10 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
+    val backendBaseUrl = providers.gradleProperty("daybookApiBaseUrl")
+        .orElse("http://10.0.2.2:5000/").get()
+    defaultConfig { buildConfigField("String", "DAYBOOK_API_BASE_URL", "\"$backendBaseUrl\"") }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

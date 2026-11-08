@@ -49,7 +49,16 @@ data class Recording(
     val chunks: List<Chunk> = emptyList(),
     val mom: String = "",           // JSON string of MoM (see MomExtractor.MoM)
     val marks: List<Mark> = emptyList(),
-    val message: String = ""        // human note, e.g. "Rekaman terputus di menit N"
+    val message: String = "",
+    val backendOptIn: Boolean = false,
+    val backendStatus: String = "NOT_REQUESTED",
+    val backendJobId: String = "",
+    val backendAudioObjectName: String = "",
+    val backendUploadComplete: Boolean = false,
+    val backendRawTranscript: String = "",
+    val backendRefinedTranscript: String = "",
+    val backendMomJson: String = "",
+    val backendMessage: String = ""
 )
 
 /** "62:15" or "1:02:15". */
@@ -293,7 +302,16 @@ object RecordingRepository {
                     .put("chunks", chunks)
                     .put("mom", r.mom)
                     .put("marks", marks)
-                    .put("message", r.message))
+                    .put("message", r.message)
+                    .put("backendOptIn", r.backendOptIn)
+                    .put("backendStatus", r.backendStatus)
+                    .put("backendJobId", r.backendJobId)
+                    .put("backendAudioObjectName", r.backendAudioObjectName)
+                    .put("backendUploadComplete", r.backendUploadComplete)
+                    .put("backendRawTranscript", r.backendRawTranscript)
+                    .put("backendRefinedTranscript", r.backendRefinedTranscript)
+                    .put("backendMomJson", r.backendMomJson)
+                    .put("backendMessage", r.backendMessage))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -353,7 +371,16 @@ object RecordingRepository {
                     chunks,
                     o.optString("mom", ""),
                     marks,
-                    o.optString("message", "")
+                    o.optString("message", ""),
+                    o.optBoolean("backendOptIn", false),
+                    o.optString("backendStatus", "NOT_REQUESTED"),
+                    o.optString("backendJobId", ""),
+                    o.optString("backendAudioObjectName", ""),
+                    o.optBoolean("backendUploadComplete", false),
+                    o.optString("backendRawTranscript", ""),
+                    o.optString("backendRefinedTranscript", ""),
+                    o.optString("backendMomJson", ""),
+                    o.optString("backendMessage", "")
                 ))
             }
             _recordings.value = list
