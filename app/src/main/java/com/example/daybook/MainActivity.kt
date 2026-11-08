@@ -359,7 +359,11 @@ fun Home(vm: VM) {
 fun RecordingsScreen(vm: VM) {
     val live by RecordingService.live.collectAsState()
     val cur = live
-    if (cur != null) ActiveRecordingScreen(cur) else RecordingsList()
+    var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
+    val resultId = openResultId
+    if (cur != null) ActiveRecordingScreen(cur)
+    else if (resultId != null) RecordingResultScreen(resultId, vm) { openResultId = null }
+    else RecordingsList { openResultId = it }
 }
 
 /** Screen shown while a recording is running: minimal, big targets, nothing to type. */
@@ -423,7 +427,7 @@ fun ActiveRecordingScreen(live: LiveRecording) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecordingsList() {
+fun RecordingsList(onOpenResult: (String) -> Unit) {
     val context = LocalContext.current
     val recs by RecordingRepository.recordings.collectAsState()
     val startError by RecordingService.startError.collectAsState()
@@ -501,10 +505,12 @@ fun RecordingsList() {
                             val transcribed = r.chunks.count { it.status == "TRANSCRIBED" }
                             if (r.chunks.isNotEmpty() && r.status != "RECORDING") {
                                 when {
-                                    r.status == "DONE" -> Text("Transkrip selesai",
+                                    r.status == "DONE" -> Text("Transkrip selesai • Lihat",
+                                        modifier = Modifier.clickable { onOpenResult(r.id) },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary)
-                                    r.status == "PARTIAL" -> Text("Transkrip sebagian: $transcribed/${r.chunks.size} bagian",
+                                    r.status == "PARTIAL" -> Text("Transkrip sebagian: $transcribed/${r.chunks.size} bagian • Lihat",
+                                        modifier = Modifier.clickable(enabled = transcribed > 0) { onOpenResult(r.id) },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.error)
                                     transcribed > 0 || r.chunks.any { it.status == "TRANSCRIBING" } ->
@@ -534,6 +540,8 @@ fun RecordingsList() {
                                 Text("Ukuran audio: ${formatSize(size)}", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Row {
+                                    if (r.chunks.any { it.status == "TRANSCRIBED" })
+                                        TextButton({ onOpenResult(r.id) }) { Text("Lihat transkrip") }
                                     TextButton({ renameTarget = r }) { Text("Ganti judul") }
                                     TextButton({ deleteTarget = r }) {
                                         Text("Hapus", color = MaterialTheme.colorScheme.error)
