@@ -39,9 +39,8 @@ dependencies {
     // OkHttp: used for the Whisper model download and the Gemini text-only call.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // sherpa-onnx (Whisper, on-device STT). Not on Maven Central: put the AAR in app/libs/
-    // (or copy its Kotlin API files + jniLibs into the project).
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    // sherpa-onnx (Whisper, on-device STT) is NOT a Maven dependency: its Kotlin API sources and
+    // jniLibs are fetched by scripts/fetch-sherpa-onnx.sh (run it before gradle).
 
     // WorkManager: sequential STT worker (1 per recording, model loaded once).
     implementation("androidx.work:work-runtime-ktx:2.12.0")
