@@ -48,11 +48,16 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     if (rec == null) return
 
     val backendTranscript = rec.backendRefinedTranscript.ifBlank { rec.backendRawTranscript }
+    val backendSegments = remember(rec) { parseBackendSegments(rec.backendSegmentsJson) }
     val segs = remember(rec) {
-        if (backendTranscript.isNotBlank()) emptyList() else RecordingRepository.combinedSegments(recordingId)
+        when {
+            backendSegments.isNotEmpty() -> backendSegments
+            backendTranscript.isBlank() -> RecordingRepository.combinedSegments(recordingId)
+            else -> emptyList()
+        }
     }
     val fallback = remember(rec) {
-        backendTranscript.ifBlank { RecordingRepository.fullTranscript(recordingId) }
+        if (segs.isNotEmpty()) "" else backendTranscript.ifBlank { RecordingRepository.fullTranscript(recordingId) }
     }
     val hasText = segs.isNotEmpty() || fallback.isNotBlank()
     val title = rec.title.ifBlank { "Meeting" }
@@ -228,6 +233,25 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             dismissButton = { TextButton({ showSaveDialog = false }) { Text("Batal") } }
         )
     }
+}
+
+/** Decode backend Whisper segment timestamps into the same timeline used by audio playback. */
+private fun parseBackendSegments(json: String): List<TimedSegment> {
+    if (json.isBlank()) return emptyList()
+    return try {
+        val array = org.json.JSONArray(json)
+        buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val text = item.optString("text", "").trim()
+                if (text.isNotBlank()) add(TimedSegment(
+                    item.optLong("startMs", 0L),
+                    item.optLong("endMs", item.optLong("startMs", 0L)),
+                    text
+                ))
+            }
+        }
+    } catch (_: Exception) { emptyList() }
 }
 
 /** Plain text for copy/share: title, blank line, then "[mm:ss] text" per segment. */
