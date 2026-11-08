@@ -87,6 +87,7 @@ class BackendUploadWorker(appContext: Context, params: WorkerParameters) : Corou
                 val raw = job.optString("rawTranscript", "")
                 val refined = job.optString("refinedTranscript", "")
                 val mom = job.optString("momJson", "")
+                val timedSegments = extractTimedSegments(job)
                 val message = job.optString("errorMessage", "")
                 RecordingRepository.update(id) { it.copy(backendStatus = status.uppercase(), backendMessage = message) }
                 when (status.lowercase()) {
@@ -94,7 +95,8 @@ class BackendUploadWorker(appContext: Context, params: WorkerParameters) : Corou
                         if (raw.isBlank() && refined.isBlank()) throw IllegalStateException("Backend selesai tetapi transkrip kosong.")
                         RecordingRepository.update(id) {
                             it.copy(backendStatus = status.uppercase(), backendRawTranscript = raw,
-                                backendRefinedTranscript = refined, backendMomJson = mom, backendMessage = message)
+                                backendRefinedTranscript = refined, backendSegmentsJson = timedSegments,
+                                backendMomJson = mom, backendMessage = message)
                         }
                         return Result.success()
                     }
@@ -120,6 +122,29 @@ class BackendUploadWorker(appContext: Context, params: WorkerParameters) : Corou
             try { merged.delete() } catch (_: Exception) {}
             try { File(merged.parentFile, merged.name + ".tmp").delete() } catch (_: Exception) {}
         }
+    }
+
+    private fun extractTimedSegments(job: JSONObject): String {
+        val output = org.json.JSONArray()
+        val chunks = job.optJSONArray("chunks") ?: return output.toString()
+        for (i in 0 until chunks.length()) {
+            val chunk = chunks.optJSONObject(i) ?: continue
+            val baseMs = (chunk.optDouble("startSeconds", 0.0) * 1000.0).toLong()
+            val encoded = chunk.optString("sttSegmentsJson", "")
+            if (encoded.isBlank() || encoded == "null") continue
+            val segments = try { org.json.JSONArray(encoded) } catch (_: Exception) { continue }
+            for (j in 0 until segments.length()) {
+                val segment = segments.optJSONObject(j) ?: continue
+                val text = segment.optString("text", segment.optString("Text", "")).trim()
+                if (text.isBlank()) continue
+                val localStart = segment.optDouble("startSeconds", segment.optDouble("StartSeconds", 0.0))
+                val localEnd = segment.optDouble("endSeconds", segment.optDouble("EndSeconds", localStart))
+                val start = baseMs + (localStart * 1000.0).toLong()
+                val end = baseMs + (localEnd * 1000.0).toLong()
+                output.put(JSONObject().put("startMs", start).put("endMs", maxOf(start, end)).put("text", text))
+            }
+        }
+        return output.toString()
     }
 
     private fun token(forceRefresh: Boolean = false): String {
