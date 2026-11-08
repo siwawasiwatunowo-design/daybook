@@ -39,8 +39,8 @@ object BackendSyncPreferences {
 
 class BackendUploadWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     private val http = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.MINUTES).readTimeout(90, TimeUnit.SECONDS)
-        .callTimeout(10, TimeUnit.MINUTES).build()
+        .writeTimeout(2, TimeUnit.HOURS).readTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(2, TimeUnit.HOURS).build()
 
     override suspend fun doWork(): Result {
         val id = inputData.getString(KEY_ID) ?: return Result.failure()
@@ -105,6 +105,8 @@ class BackendUploadWorker(appContext: Context, params: WorkerParameters) : Corou
             }
             RecordingRepository.update(id) { it.copy(backendStatus = "PROCESSING", backendMessage = "Masih diproses; akan dilanjutkan otomatis.") }
             return Result.retry()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             val message = e.message ?: "Kesalahan upload/backend."
             if (runAttemptCount >= MAX_RETRIES) {

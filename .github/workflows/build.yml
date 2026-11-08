@@ -17,7 +17,7 @@ jobs:
       - name: Fetch sherpa-onnx
         run: bash scripts/fetch-sherpa-onnx.sh
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon -PdaybookApiBaseUrl="${{ vars.DAYBOOK_API_BASE_URL || 'http://10.0.2.2:5000/' }}"
       - uses: actions/upload-artifact@v4
         with:
           name: Daybook-APK
