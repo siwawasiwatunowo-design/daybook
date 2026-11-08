@@ -22,15 +22,28 @@ if [ ! -f "$JNI_DIR/arm64-v8a/libsherpa-onnx-jni.so" ]; then
   rm -rf "$tmp"
 fi
 
-# 2) Kotlin API sources (same tag as the native libs)
+# 2) Kotlin API sources (same tag as the native libs).
+# NOTE: kotlin-api-examples/*.kt are Git symlinks (raw download returns only the link text),
+# so fetch the real files from sherpa-onnx/kotlin-api/.
 mkdir -p "$KT_DIR"
-BASE="https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v${VER}/kotlin-api-examples"
+BASE="https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v${VER}/sherpa-onnx/kotlin-api"
+
+fetch_kt() {  # $1 = file base name; returns non-zero if download fails or is not Kotlin source
+  local out="$KT_DIR/$1.kt"
+  curl -fSL -o "$out" "$BASE/$1.kt" 2>/dev/null || { rm -f "$out"; return 1; }
+  if ! grep -q '^package com.k2fsa.sherpa.onnx' "$out"; then
+    echo "ERROR: $1.kt is not Kotlin source (first line: $(head -n 1 "$out"))" >&2
+    rm -f "$out"
+    return 1
+  fi
+}
+
 for f in FeatureConfig OfflineRecognizer OfflineStream; do
-  curl -fSL -o "$KT_DIR/$f.kt" "$BASE/$f.kt"
+  fetch_kt "$f" || { echo "Failed to fetch required file $f.kt from $BASE" >&2; exit 1; }
 done
 # Present only in some versions; OfflineRecognizer.kt needs them when they exist.
 for f in QnnConfig HomophoneReplacerConfig; do
-  curl -fSL -o "$KT_DIR/$f.kt" "$BASE/$f.kt" 2>/dev/null || rm -f "$KT_DIR/$f.kt"
+  fetch_kt "$f" || echo "Skipping optional $f.kt"
 done
 
 echo "sherpa-onnx v${VER} ready:"
