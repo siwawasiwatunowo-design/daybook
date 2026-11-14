@@ -8,22 +8,28 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.workDataOf
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import androidx.work.workDataOf
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.delay
+import java.io.File
+import java.util.UUID
 
 /**
- * Sequential STT worker (§7). One worker per recording (beginUniqueWork KEEP),
- * Whisper recognizer created ONCE and reused across chunks. Chunks are transcribed in
- * order; a failed chunk is marked FAILED and the worker continues with the
- * next (audio is never lost). setForeground keeps the system from killing it
- * after ~10 minutes.
+ * Cloud STT Worker.
+ * Communicates with `daybook-api` to transcribe audio using Groq Whisper Large-V3
+ * and refine it with Google Gemini.
  *
- * After all chunks: recording status becomes DONE (or PARTIAL/FAILED), and MoM
- * generation is offered on demand from the result screen (consent-gated, §8).
+ * Sequence:
+ * 1. Checks internet & Firebase Authentication.
+ * 2. Prepares WAV audio from recording chunks.
+ * 3. Requests a presigned S3 upload URL from daybook-api (POST /api/recordings/upload-url).
+ * 4. Uploads audio directly to Neon Object Storage via HTTP PUT.
+ * 5. Dispatches transcription job to daybook-api (POST /api/recordings).
+ * 6. Polls backend status until completed, then updates RecordingRepository.
  */
 class SttWorker(
     appContext: Context,
@@ -34,69 +40,177 @@ class SttWorker(
         val id = inputData.getString(KEY_ID) ?: return Result.failure()
         val rec = RecordingRepository.get(id) ?: return Result.failure()
 
-        setForeground(foregroundInfo("Mentranskrip…"))
-        val modelDir = try {
-            LocalTranscriber.ensureModel(applicationContext)
-        } catch (e: Exception) {
-            // Model download failed (no internet on first use). Retry later.
-            RecordingRepository.update(id) { it.copy(status = "FAILED", message = "Gagal unduh model STT: ${e.message}") }
-            return Result.retry()
-        }
+        setForeground(foregroundInfo("Menghubungkan ke server transkripsi…"))
 
-        val recognizer: OfflineRecognizer = try {
-            LocalTranscriber.createRecognizer(modelDir)
-        } catch (e: Throwable) {
-            RecordingRepository.update(id) { it.copy(status = "FAILED", message = "Gagal memuat model STT: ${e.message}") }
+        // Check Firebase user login
+        val user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            RecordingRepository.update(id) {
+                it.copy(
+                    status = "FAILED",
+                    message = "Harap login ke akun Daybook terlebih dahulu untuk mentranskrip."
+                )
+            }
             return Result.failure()
         }
+
         try {
-            var ok = false
-            var fail = false
-            rec.chunks.forEach { chunk ->
-                if (chunk.status == "TRANSCRIBED") return@forEach
-                RecordingRepository.setChunkStatus(id, chunk.index, "TRANSCRIBING")
-                setForeground(foregroundInfo("Mentranskrip chunk ${chunk.index}/${rec.chunks.size}"))
-                try {
-                    val wav = RecordingRepository.chunkFile(id, chunk.fileName)
-                    val segs = LocalTranscriber.transcribeTimed(recognizer, wav)
-                    val text = segs.joinToString(" ") { it.text }
-                    RecordingRepository.updateChunk(id, chunk.index) {
-                        it.copy(segments = segs, transcript = text, status = "TRANSCRIBED")
+            // Collect and prepare audio files
+            val chunkFiles = rec.chunks.sortedBy { it.index }
+                .map { RecordingRepository.chunkFile(id, it.fileName) }
+                .filter { it.exists() && it.length() > WavIO.HEADER_SIZE }
+
+            if (chunkFiles.isEmpty()) {
+                RecordingRepository.update(id) {
+                    it.copy(status = "FAILED", message = "File audio rekaman tidak ditemukan.")
+                }
+                return Result.failure()
+            }
+
+            // If there's 1 chunk use it directly, otherwise stitch all chunks into one WAV
+            val audioToUpload = if (chunkFiles.size == 1) {
+                chunkFiles.first()
+            } else {
+                val combined = File(RecordingRepository.dir(id), "stitched_recording.wav")
+                WavIO.stitchWavFiles(chunkFiles, combined)
+            }
+
+            val clientRecordingId = UUID.randomUUID().toString()
+            val durationSec = (rec.chunks.sumOf { it.durationMs } / 1000).toInt().coerceAtLeast(1)
+
+            // Step 1: Request upload URL
+            RecordingRepository.update(id) {
+                it.copy(status = "PROCESSING", message = "Meminta upload URL...")
+            }
+            setForeground(foregroundInfo("Menyiapkan upload audio…"))
+            val uploadInfo = DaybookApiClient.createUploadUrl(applicationContext, clientRecordingId)
+
+            // Step 2: Upload audio bytes to presigned Neon S3 URL
+            RecordingRepository.update(id) {
+                it.copy(status = "PROCESSING", message = "Mengunggah audio ke cloud storage...")
+            }
+            setForeground(foregroundInfo("Mengunggah audio ke storage…"))
+            DaybookApiClient.uploadAudio(uploadInfo.uploadUrl, audioToUpload)
+
+            // Step 3: Trigger processing job on backend
+            RecordingRepository.update(id) {
+                it.copy(status = "PROCESSING", message = "Memproses transkripsi (Groq Whisper Large-V3)...")
+            }
+            setForeground(foregroundInfo("Mentranskrip via Groq Whisper Large-V3…"))
+            val jobId = DaybookApiClient.submitJob(
+                context = applicationContext,
+                audioObjectName = uploadInfo.audioObjectName,
+                durationSeconds = durationSec,
+                activityCode = "GENERAL_MEETING",
+                language = "id"
+            )
+
+            // Step 4: Poll backend status until complete
+            var attempts = 0
+            val maxAttempts = 120 // ~6 minutes maximum wait time
+            var completedJob: BackendJobStatus? = null
+
+            while (attempts < maxAttempts) {
+                delay(3000)
+                attempts++
+
+                val status = DaybookApiClient.getJobStatus(applicationContext, jobId)
+                if (status.status.equals("Completed", ignoreCase = true)) {
+                    completedJob = status
+                    break
+                } else if (status.status.equals("Failed", ignoreCase = true)) {
+                    val err = status.errorMessage ?: "Transkripsi di server gagal."
+                    RecordingRepository.update(id) {
+                        it.copy(status = "FAILED", message = err)
                     }
-                    ok = true
-                } catch (e: Exception) {
-                    RecordingRepository.setChunkStatus(id, chunk.index, "FAILED")
-                    fail = true
+                    return Result.failure()
+                }
+
+                val completedChunks = status.chunks.count { it.status.equals("Completed", ignoreCase = true) }
+                val totalChunks = status.chunks.size
+                val progressMsg = if (totalChunks > 0) {
+                    "Mentranskrip bagian $completedChunks/$totalChunks..."
+                } else {
+                    "Memproses di server..."
+                }
+                RecordingRepository.update(id) { it.copy(message = progressMsg) }
+                setForeground(foregroundInfo(progressMsg))
+            }
+
+            if (completedJob == null) {
+                RecordingRepository.update(id) {
+                    it.copy(status = "FAILED", message = "Waktu proses di server habis (timeout).")
+                }
+                return Result.failure()
+            }
+
+            // Step 5: Save high-quality results back into local RecordingRepository
+            val fullRefined = completedJob.refinedTranscript.ifBlank { completedJob.rawTranscript }
+            val momJson = completedJob.momJson
+
+            if (completedJob.chunks.isNotEmpty()) {
+                completedJob.chunks.forEach { backendChunk ->
+                    val chunkText = backendChunk.refinedTranscript.ifBlank { backendChunk.rawTranscript }
+                    val chunkIndex = backendChunk.sequence + 1
+                    RecordingRepository.updateChunk(id, chunkIndex) { localChunk ->
+                        localChunk.copy(
+                            status = "TRANSCRIBED",
+                            transcript = chunkText,
+                            segments = backendChunk.segments
+                        )
+                    }
+                }
+            } else {
+                // If chunks array was empty, update all local chunks with the main transcript
+                val firstChunk = rec.chunks.firstOrNull()
+                if (firstChunk != null) {
+                    RecordingRepository.updateChunk(id, firstChunk.index) {
+                        it.copy(
+                            status = "TRANSCRIBED",
+                            transcript = fullRefined
+                        )
+                    }
                 }
             }
-            val status = when {
-                fail && !ok -> "FAILED"
-                fail -> "PARTIAL"
-                else -> "DONE"
+
+            RecordingRepository.update(id) { r ->
+                r.copy(
+                    status = "DONE",
+                    mom = momJson,
+                    message = "Transkripsi selesai (Groq Whisper Large-V3)"
+                )
             }
-            RecordingRepository.update(id) { it.copy(status = status) }
+
             return Result.success()
-        } finally {
-            recognizer.release()
+
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: "Terjadi kesalahan jaringan atau server."
+            RecordingRepository.update(id) {
+                it.copy(
+                    status = "FAILED",
+                    message = "Transkripsi gagal: $errorMsg"
+                )
+            }
+            return Result.failure()
         }
     }
 
     private fun foregroundInfo(text: String): ForegroundInfo {
         val channelId = CHANNEL_ID
         val nm = applicationContext.getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(channelId) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(channelId, "Transkripsi", NotificationManager.IMPORTANCE_LOW)
+        if (Build.VERSION.SDK_INT >= 26 && nm?.getNotificationChannel(channelId) == null) {
+            nm?.createNotificationChannel(
+                NotificationChannel(channelId, "Transkripsi Cloud", NotificationManager.IMPORTANCE_LOW)
             )
         }
         val notif = NotificationCompat.Builder(applicationContext, channelId)
-            .setContentTitle("Daybook — transkripsi")
+            .setContentTitle("Daybook — Transkripsi Cloud")
             .setContentText(text)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
-        // Android 14+: declare the dataSync foreground service type explicitly.
+
         return if (Build.VERSION.SDK_INT >= 34) {
             ForegroundInfo(NOTIFY_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -105,7 +219,6 @@ class SttWorker(
     }
 
     companion object {
-        /** One unique, sequential chain per recording (KEEP: a second request is ignored). */
         fun enqueue(context: Context, recordingId: String) {
             val req = OneTimeWorkRequestBuilder<SttWorker>()
                 .setInputData(workDataOf(KEY_ID to recordingId))

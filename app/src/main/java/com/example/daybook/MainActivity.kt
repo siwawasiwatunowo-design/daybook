@@ -3,6 +3,7 @@ package com.example.daybook
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import android.provider.Settings
 import android.content.pm.PackageManager
@@ -434,6 +435,7 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
     var expandedId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Recording?>(null) }
     var deleteTarget by remember { mutableStateOf<Recording?>(null) }
+    var showApiConfigDialog by remember { mutableStateOf(false) }
     val prefs = remember { context.getSharedPreferences("daybook_prefs", Context.MODE_PRIVATE) }
     var tipDismissed by remember { mutableStateOf(prefs.getBoolean("battery_tip_dismissed", false)) }
 
@@ -447,6 +449,22 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Server API: ${DaybookApiConfig.getBaseUrl(context)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = { showApiConfigDialog = true }) {
+                        Text("Ubah", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
             if (!tipDismissed) item {
                 Card(Modifier.fillMaxWidth().padding(12.dp)) {
                     Column(Modifier.padding(12.dp)) {
@@ -539,9 +557,11 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
                                 val size = remember(r.id, r.chunks.size) { RecordingRepository.diskBytes(r.id) }
                                 Text("Ukuran audio: ${formatSize(size)}", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Row {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     if (r.chunks.any { it.status == "TRANSCRIBED" })
                                         TextButton({ onOpenResult(r.id) }) { Text("Lihat transkrip") }
+                                    if (r.status != "RECORDING" && r.status != "PROCESSING")
+                                        TextButton({ SttWorker.enqueue(context, r.id) }) { Text("Transkrip Cloud") }
                                     TextButton({ renameTarget = r }) { Text("Ganti judul") }
                                     TextButton({ deleteTarget = r }) {
                                         Text("Hapus", color = MaterialTheme.colorScheme.error)
@@ -568,6 +588,40 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
             },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
         ) { Icon(Icons.Default.Mic, "Rekam") }
+    }
+
+    if (showApiConfigDialog) {
+        var urlText by remember { mutableStateOf(DaybookApiConfig.getBaseUrl(context)) }
+        AlertDialog(
+            onDismissRequest = { showApiConfigDialog = false },
+            title = { Text("URL Server Daybook API") },
+            text = {
+                Column {
+                    Text(
+                        "Masukkan base URL backend daybook-api.\n• Emulator: http://10.0.2.2:8080\n• HP Fisik (Wi-Fi): http://<IP_KOMPUTER>:8080",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = urlText,
+                        onValueChange = { urlText = it },
+                        label = { Text("Base URL API") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button({
+                    DaybookApiConfig.setBaseUrl(context, urlText)
+                    showApiConfigDialog = false
+                    Toast.makeText(context, "URL Server disimpan: $urlText", Toast.LENGTH_SHORT).show()
+                }) { Text("Simpan") }
+            },
+            dismissButton = {
+                TextButton({ showApiConfigDialog = false }) { Text("Batal") }
+            }
+        )
     }
 
     renameTarget?.let { r ->
@@ -611,10 +665,10 @@ private fun statusLabel(s: String): String = when (s) {
     "RECORDED" -> "tersimpan"
     "TRANSCRIBING" -> "mentranskrip…"
     "TRANSCRIBED" -> "transkrip ✓"
-    "PROCESSING" -> "audio tersimpan"
+    "PROCESSING" -> "memproses cloud…"
     "INTERRUPTED" -> "terputus"
     "PARTIAL" -> "sebagian"
-    "DONE" -> "selesai"
+    "DONE" -> "selesai ✓"
     "FAILED" -> "gagal"
     else -> s
 }

@@ -79,6 +79,30 @@ object WavIO {
     fun durationMs(wav: File): Long =
         maxOf(0L, wav.length() - HEADER_SIZE) * 1000L / (2L * SAMPLE_RATE)
 
+    /** Stitches multiple WAV chunks into a single valid WAV file without headers in between. */
+    fun stitchWavFiles(inputs: List<File>, output: File): File {
+        val valid = inputs.filter { it.exists() && it.length() > HEADER_SIZE }
+        if (valid.isEmpty()) throw java.io.FileNotFoundException("Tidak ada file audio WAV valid untuk digabungkan.")
+        if (valid.size == 1 && valid.first().absolutePath == output.absolutePath) return output
+        val totalData = valid.sumOf { it.length() - HEADER_SIZE }
+        FileOutputStream(output).use { out ->
+            writeWavHeader(out, dataLen = totalData)
+            valid.forEach { f ->
+                f.inputStream().use { input ->
+                    var remaining = HEADER_SIZE.toLong()
+                    while (remaining > 0) {
+                        val skipped = input.skip(remaining)
+                        if (skipped <= 0) break
+                        remaining -= skipped
+                    }
+                    input.copyTo(out)
+                }
+            }
+            out.flush()
+        }
+        return output
+    }
+
     private fun intLE(v: Int): ByteArray =
         byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(),
             ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte())

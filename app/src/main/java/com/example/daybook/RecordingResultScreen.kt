@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
 
@@ -89,7 +90,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
-                    clipboard.setText(AnnotatedString(plainText(title, segs, fallback)))
+                    clipboard.setText(AnnotatedString(plainText(title, segs, fallback, rec.mom)))
                     Toast.makeText(context, "Transkrip disalin", Toast.LENGTH_SHORT).show()
                 },
                 enabled = hasText
@@ -99,7 +100,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                     val send = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_SUBJECT, title)
-                        putExtra(Intent.EXTRA_TEXT, plainText(title, segs, fallback))
+                        putExtra(Intent.EXTRA_TEXT, plainText(title, segs, fallback, rec.mom))
                     }
                     context.startActivity(Intent.createChooser(send, "Bagikan transkrip"))
                 },
@@ -133,7 +134,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         }
 
         Text(
-            "Transkrip otomatis (Whisper, offline) — bisa ada salah dengar, terutama nama dan istilah teknis. " +
+            "Transkrip cloud (Groq Whisper Large-V3). " +
                 "Ketuk satu baris untuk memutar audio dari momen itu.",
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall,
@@ -142,6 +143,18 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         HorizontalDivider()
 
         LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+            if (rec.mom.isNotBlank()) item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("📋 Notulen & Ringkasan (Gemini MoM)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(6.dp))
+                        Text(formatMomText(rec.mom), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             if (failed.isNotEmpty()) item {
                 Text("Bagian ${failed.joinToString { it.index.toString() }} gagal ditranskrip.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -190,7 +203,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                             Entry(
                                 type = "note",
                                 title = "Transkrip - $title",
-                                body = noteHtml(title, segs, fallback),
+                                body = noteHtml(title, segs, fallback, rec.mom),
                                 date = Instant.ofEpochMilli(rec.createdAt)
                                     .atZone(ZoneId.systemDefault()).toLocalDate().toString(),
                                 tag = "Journal"
@@ -208,13 +221,68 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     }
 }
 
-/** Plain text for copy/share: title, blank line, then "[mm:ss] text" per segment. */
-private fun plainText(title: String, segs: List<TimedSegment>, fallback: String): String = buildString {
+private fun formatMomText(jsonStr: String): String {
+    try {
+        val clean = jsonStr.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val obj = JSONObject(clean)
+        val sb = StringBuilder()
+        if (obj.has("overview")) {
+            sb.append(obj.optString("overview")).append("\n\n")
+        }
+        if (obj.has("decisions")) {
+            val dec = obj.optJSONArray("decisions")
+            if (dec != null && dec.length() > 0) {
+                sb.append("• Keputusan:\n")
+                for (i in 0 until dec.length()) sb.append("  - ").append(dec.getString(i)).append("\n")
+                sb.append("\n")
+            }
+        }
+        if (obj.has("actionItems")) {
+            val act = obj.optJSONArray("actionItems")
+            if (act != null && act.length() > 0) {
+                sb.append("• Tindak Lanjut / Action Items:\n")
+                for (i in 0 until act.length()) {
+                    val item = act.optJSONObject(i)
+                    if (item != null) {
+                        val task = item.optString("task")
+                        val owner = item.optString("owner")
+                        val deadline = item.optString("deadline")
+                        sb.append("  - $task")
+                        if (owner.isNotBlank() && owner != "null") sb.append(" (PIC: $owner)")
+                        if (deadline.isNotBlank() && deadline != "null") sb.append(" [Deadline: $deadline]")
+                        sb.append("\n")
+                    } else {
+                        sb.append("  - ").append(act.getString(i)).append("\n")
+                    }
+                }
+                sb.append("\n")
+            }
+        }
+        if (obj.has("discussionPoints")) {
+            val disc = obj.optJSONArray("discussionPoints")
+            if (disc != null && disc.length() > 0) {
+                sb.append("• Poin Diskusi:\n")
+                for (i in 0 until disc.length()) sb.append("  - ").append(disc.getString(i)).append("\n")
+            }
+        }
+        val res = sb.toString().trim()
+        if (res.isNotBlank()) return res
+    } catch (_: Exception) {}
+    return jsonStr
+}
+
+/** Plain text for copy/share: title, MoM summary (if any), blank line, then "[mm:ss] text" per segment. */
+private fun plainText(title: String, segs: List<TimedSegment>, fallback: String, momJson: String = ""): String = buildString {
     append(title).append("\n\n")
+    if (momJson.isNotBlank()) {
+        append("=== NOTULEN & RINGKASAN (MoM) ===\n")
+        append(formatMomText(momJson)).append("\n\n")
+        append("=== TRANSKRIP LENGKAP ===\n")
+    }
     if (segs.isEmpty()) append(fallback)
     else segs.forEach { append('[').append(formatClock(it.startMs)).append("] ").append(it.text).append('\n') }
 }.trim()
 
 /** Note body is HTML (the Notes editor loads it with setHtml). Escape text, use <br> for newlines. */
-private fun noteHtml(title: String, segs: List<TimedSegment>, fallback: String): String =
-    TextUtils.htmlEncode(plainText(title, segs, fallback)).replace("\n", "<br>")
+private fun noteHtml(title: String, segs: List<TimedSegment>, fallback: String, momJson: String = ""): String =
+    TextUtils.htmlEncode(plainText(title, segs, fallback, momJson)).replace("\n", "<br>")
