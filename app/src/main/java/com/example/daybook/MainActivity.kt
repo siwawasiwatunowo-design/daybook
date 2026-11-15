@@ -60,6 +60,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.time.LocalDate
@@ -165,16 +167,23 @@ class VM : ViewModel() {
             .addOnFailureListener { onDone(it.message ?: "Failed to send reset email") }
     }
 
-    fun reviewWithAI(noteTitle: String, noteBodyHtml: String) {
-        // Phase 1: Gemini AI Review is disabled (local-first; API key removed for
-        // security). It returns as an opt-in cloud feature in Phase 7. For now we
-        // just surface a clear "disabled" notice via the existing AI Review sheet.
-        aiResult.value = "AI Review sementara dinonaktifkan.\n\n" +
-            "Fitur ini memakai Gemini (cloud) yang sedang dimatikan demi keamanan — " +
-            "API key telah dihapus dari kode.\n\n" +
-            "AI Review & pembuatan MoM akan kembali sebagai fitur opsional di Fase 7 " +
-            "(dengan persetujuan eksplisit sebelum mengirim data). Sementara itu, " +
-            "rekaman tetap aman tersimpan di perangkat."
+    fun reviewWithAI(context: Context, noteTitle: String, noteBodyHtml: String) {
+        if (aiLoading.value) return
+        aiLoading.value = true
+        aiResult.value = null
+        viewModelScope.launch {
+            try {
+                val plainText = Html.fromHtml(noteBodyHtml, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+                val result = withContext(Dispatchers.IO) {
+                    DaybookApiClient.reviewNote(context, noteTitle, plainText)
+                }
+                aiResult.value = result
+            } catch (ex: Exception) {
+                aiResult.value = "AI Review belum berhasil. Catatan tetap tersimpan.\\n\\n${ex.message ?: "Periksa koneksi dan backend Daybook."}"
+            } finally {
+                aiLoading.value = false
+            }
+        }
     }
 
     fun clearAiResult() { aiResult.value = null }
@@ -891,7 +900,7 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
 
                     // AI Review button
                     IconButton(
-                        onClick = { vm.reviewWithAI(title, richState.toHtml()) },
+                        onClick = { vm.reviewWithAI(context, title, richState.toHtml()) },
                         enabled = !aiLoading && recordState == RecordState.IDLE &&
                                 (title.isNotBlank() || richState.toHtml().isNotBlank())
                     ) {
