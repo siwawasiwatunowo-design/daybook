@@ -77,6 +77,25 @@ object DaybookApiClient {
         }
     }
 
+    fun assistNote(context: Context, title: String, content: String, action: String, instruction: String? = null): String {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val body = JSONObject().put("title", title).put("content", content)
+            .put("action", action).put("instruction", instruction).toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/notes/ai-assist")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA))
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("AI Assistant gagal (HTTP ${response.code}): $responseBody")
+            return JSONObject(responseBody).optString("result")
+                .ifBlank { throw IOException("AI Assistant mengembalikan hasil kosong.") }
+        }
+    }
+
     /**
      * Step 1: Request presigned S3 upload URL from daybook-api
      */
