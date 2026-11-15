@@ -72,6 +72,7 @@ object DaybookApiClient {
         val request = Request.Builder()
             .url("$baseUrl/api/recordings/upload-url")
             .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
             .post(jsonBody.toRequestBody(JSON_MEDIA))
             .build()
 
@@ -136,6 +137,7 @@ object DaybookApiClient {
         val request = Request.Builder()
             .url("$baseUrl/api/recordings")
             .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
             .post(jsonBody.toRequestBody(JSON_MEDIA))
             .build()
 
@@ -159,6 +161,7 @@ object DaybookApiClient {
         val request = Request.Builder()
             .url("$baseUrl/api/recordings/$jobId")
             .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
             .get()
             .build()
 

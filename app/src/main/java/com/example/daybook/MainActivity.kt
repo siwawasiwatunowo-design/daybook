@@ -598,7 +598,7 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
             text = {
                 Column {
                     Text(
-                        "Masukkan base URL backend daybook-api.\n• Emulator: http://10.0.2.2:8080\n• HP Fisik (Wi-Fi): http://<IP_KOMPUTER>:8080",
+                        "Masukkan base URL backend daybook-api.\n• Default (ngrok): https://tubeless-gutless-unlined.ngrok-free.dev\n• Lokal: http://10.0.2.2:8080 atau IP Wi-Fi PC",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(Modifier.height(8.dp))

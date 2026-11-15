@@ -5,10 +5,9 @@ import android.content.Context
 object DaybookApiConfig {
     /**
      * Default base URL.
-     * http://10.0.2.2:8080 is localhost for the Android Emulator.
-     * For a physical device on Wi-Fi, change this to your PC's IP, e.g. "http://192.168.1.100:8080".
+     * Uses the public ngrok endpoint by default, accessible from both emulator and physical device anywhere.
      */
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:8080"
+    const val DEFAULT_BASE_URL = "https://tubeless-gutless-unlined.ngrok-free.dev"
     private const val PREF_KEY_BASE_URL = "api_base_url"
 
     fun getBaseUrl(context: Context): String {
