@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -231,7 +233,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             onDismissRequest = { coaching = null },
             title = { Text("Speaking Coach") },
             text = {
-                Column(Modifier.heightIn(max = 440.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                     Text("Evaluasi berbasis transkrip. Untuk meeting multi-speaker, atribusi ucapan ke diri lo belum tentu akurat.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
