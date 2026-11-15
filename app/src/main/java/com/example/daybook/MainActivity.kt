@@ -441,6 +441,12 @@ fun ActiveRecordingScreen(live: LiveRecording) {
 fun RecordingsList(onOpenResult: (String) -> Unit) {
     val context = LocalContext.current
     val recs by RecordingRepository.recordings.collectAsState()
+
+    // Refresh from durable storage each time this screen is entered. This is
+    // independent of Firebase sign-in/out and never deletes local audio.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { RecordingRepository.reload() }
+    }
     val startError by RecordingService.startError.collectAsState()
     var expandedId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Recording?>(null) }
