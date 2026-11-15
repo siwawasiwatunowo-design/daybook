@@ -20,6 +20,25 @@ jobs:
         env:
           DAYBOOK_API_BASE_URL: ${{ vars.DAYBOOK_API_BASE_URL }}
         run: gradle assembleDebug --no-daemon -PDAYBOOK_API_BASE_URL="${{ vars.DAYBOOK_API_BASE_URL }}"
+      - name: Print APK signing certificate fingerprints
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
+
+          if [ ! -f "$APK" ]; then
+            echo "::error::APK not found at $APK"
+            exit 1
+          fi
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found under $SDK_ROOT/build-tools"
+            exit 1
+          fi
+
+          echo "Verifying APK: $APK"
+          "$APKSIGNER" verify --print-certs "$APK"
       - uses: actions/upload-artifact@v4
         with:
           name: Daybook-APK
