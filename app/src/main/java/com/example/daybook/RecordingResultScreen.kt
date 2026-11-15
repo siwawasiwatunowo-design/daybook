@@ -106,6 +106,16 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                 },
                 enabled = hasText
             ) { Text("Bagikan") }
+            OutlinedButton(
+                onClick = {
+                    try {
+                        PublicRecordingExporter.shareRecordingAudio(context, rec)
+                    } catch (ex: Exception) {
+                        Toast.makeText(context, ex.message ?: "Gagal menyiapkan file WAV", Toast.LENGTH_LONG).show()
+                    }
+                },
+                enabled = rec.chunks.isNotEmpty()
+            ) { Text("WAV") }
             Button(onClick = { showSaveDialog = true }, enabled = hasText && !saved) {
                 Text(if (saved) "Tersimpan ✓" else "Simpan ke Notes")
             }

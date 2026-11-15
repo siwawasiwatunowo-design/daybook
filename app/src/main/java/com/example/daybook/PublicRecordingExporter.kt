@@ -2,6 +2,7 @@ package com.example.daybook
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -158,6 +159,25 @@ object PublicRecordingExporter {
                 out.write(recording.mom.toByteArray(Charsets.UTF_8))
             }
         }
+    }
+
+
+    fun shareRecordingAudio(context: Context, recording: Recording) {
+        exportRecording(context, recording)
+        if (Build.VERSION.SDK_INT < 29) {
+            throw IllegalStateException("Berbagi WAV langsung memerlukan Android 10 atau lebih baru.")
+        }
+        val path = relativePath(recording.id)
+        val uri = findExisting(context, path, "recording.wav")
+            ?: throw IllegalStateException("File recording.wav belum berhasil diekspor.")
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, recording.title.ifBlank { "Daybook recording" })
+            clipData = android.content.ClipData.newUri(context.contentResolver, "Daybook WAV", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Bagikan rekaman WAV"))
     }
 
     fun deleteRecording(context: Context, recordingId: String) {
