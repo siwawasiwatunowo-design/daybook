@@ -1,71 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Compass icon — minimalist needle design
-  Dark blue background handled by ic_launcher_background.xml
-  This foreground is the white compass needle + ring, centered in a 108x108dp safe zone
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Outer thin circle ring -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
-        android:pathData="M54,20 A34,34 0 1,1 53.99,20 Z" />
-
-    <!-- North needle (pointing up-right) — white solid -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="
-            M54,54
-            L47,68
-            L54,63
-            L61,68
-            Z" />
-
-    <!-- South needle (pointing down-left) — white semi-transparent -->
-    <path
-        android:fillColor="#AAFFFFFF"
-        android:pathData="
-            M54,54
-            L47,40
-            L54,45
-            L61,40
-            Z" />
-
-    <!-- Center dot -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
-
-    <!-- Cardinal direction marks: N, S, E, W — small tick lines -->
-    <!-- North tick -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M54,22 L54,27" />
-    <!-- South tick -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M54,81 L54,86" />
-    <!-- East tick -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M81,54 L86,54" />
-    <!-- West tick -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M22,54 L27,54" />
-
+    <!-- Distinctive open-book / daily compass mark: a protected central page with a rising spark. -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M22,30 C33,25 44,27 54,34 C64,27 75,25 86,30 L86,76 C74,72 63,74 54,81 C45,74 34,72 22,76 Z"/>
+    <path android:fillColor="#FF16324F"
+        android:pathData="M28,35 C37,32 45,34 51,39 L51,73 C44,68 36,67 28,70 Z"/>
+    <path android:fillColor="#FF16324F"
+        android:pathData="M57,39 C63,34 71,32 80,35 L80,70 C72,67 64,68 57,73 Z"/>
+    <path android:fillColor="#FFFFB45A"
+        android:pathData="M72,16 L76,26 L86,30 L76,34 L72,44 L68,34 L58,30 L68,26 Z"/>
+    <path android:fillColor="#FFFFB45A"
+        android:pathData="M38,48 L43,53 L38,58 L33,53 Z"/>
 </vector>
