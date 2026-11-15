@@ -25,6 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
@@ -57,6 +60,10 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
 
     var showSaveDialog by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    var coaching by remember { mutableStateOf<String?>(null) }
+    var coachingLoading by remember { mutableStateOf(false) }
+    var coachingError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     // Audio playback: all chunks as one timeline, same clock as the transcript segments.
     val player = remember(rec.id, rec.chunks.size) {
@@ -84,6 +91,27 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                 Text(formatClock(rec.chunks.sumOf { it.durationMs }) + " • transkrip",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    coachingError = null
+                    coachingLoading = true
+                    scope.launch {
+                        try {
+                            val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
+                            coaching = withContext(Dispatchers.IO) { DaybookApiClient.coachSpeaking(context, speechText) }
+                        } catch (e: Exception) {
+                            coachingError = e.message ?: "Gagal menjalankan Speaking Coach."
+                        } finally { coachingLoading = false }
+                    }
+                },
+                enabled = hasText && !coachingLoading
+            ) {
+                if (coachingLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Text("Speaking Coach")
             }
         }
 
@@ -195,6 +223,37 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                 }
             }
         }
+    }
+
+
+    coaching?.let { feedback ->
+        AlertDialog(
+            onDismissRequest = { coaching = null },
+            title = { Text("Speaking Coach") },
+            text = {
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    Text("Evaluasi berbasis transkrip. Untuk meeting multi-speaker, atribusi ucapan ke diri lo belum tentu akurat.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+                    Text(feedback, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.save(Entry(type = "note", title = "Speaking Coach - $title",
+                        body = TextUtils.htmlEncode("Speaking Coach\n\n$feedback").replace("\n", "<br>"),
+                        date = Instant.ofEpochMilli(rec.createdAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(),
+                        tag = "Learning"))
+                    Toast.makeText(context, "Evaluasi disimpan ke Notes", Toast.LENGTH_SHORT).show()
+                    coaching = null
+                }) { Text("Simpan ke Notes") }
+            },
+            dismissButton = { TextButton(onClick = { coaching = null }) { Text("Tutup") } }
+        )
+    }
+    coachingError?.let { message ->
+        AlertDialog(onDismissRequest = { coachingError = null }, title = { Text("Speaking Coach") },
+            text = { Text(message) }, confirmButton = { TextButton(onClick = { coachingError = null }) { Text("OK") } })
     }
 
     if (showSaveDialog) {
