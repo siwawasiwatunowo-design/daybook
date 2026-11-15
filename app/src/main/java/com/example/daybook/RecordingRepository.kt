@@ -92,6 +92,24 @@ object RecordingRepository {
         indexCorrupt = !load()
     }
 
+    /**
+     * Re-read the durable index whenever the Recordings screen is opened.
+     * If the index is missing, empty, or corrupt, recover metadata from the
+     * recording folders without deleting or rewriting any audio files.
+     */
+    @Synchronized fun reload() {
+        if (!::appContext.isInitialized) return
+        val loaded = load()
+        if (!loaded) {
+            indexCorrupt = true
+            _recordings.value = emptyList()
+        }
+        if (_recordings.value.isEmpty()) {
+            rebuildFromDisk()
+        }
+        indexCorrupt = false
+    }
+
     /** True if index.json existed but could not be parsed; recoverInterrupted() then rebuilds from disk. */
     private var indexCorrupt = false
 
