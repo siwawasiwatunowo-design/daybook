@@ -111,6 +111,7 @@ class VM : ViewModel() {
     val user = MutableStateFlow<FirebaseUser?>(auth.currentUser)
     val saveStatus = MutableStateFlow(SaveStatus.IDLE)
     val aiResult = MutableStateFlow<String?>(null)
+    val aiAction = MutableStateFlow("improve")
     val aiLoading = MutableStateFlow(false)
 
     // Recording state
@@ -201,7 +202,7 @@ class VM : ViewModel() {
             .addOnFailureListener { onDone(it.message ?: "Failed to send reset email") }
     }
 
-    fun reviewWithAI(context: Context, noteTitle: String, noteBodyHtml: String) {
+    fun reviewWithAI(context: Context, noteTitle: String, noteBodyHtml: String, action: String = "improve", instruction: String? = null) {
         if (aiLoading.value) return
         aiLoading.value = true
         aiResult.value = null
@@ -209,11 +210,12 @@ class VM : ViewModel() {
             try {
                 val plainText = Html.fromHtml(noteBodyHtml, Html.FROM_HTML_MODE_LEGACY).toString().trim()
                 val result = withContext(Dispatchers.IO) {
-                    DaybookApiClient.reviewNote(context, noteTitle, plainText)
+                    DaybookApiClient.assistNote(context, noteTitle, plainText, action, instruction)
                 }
+                aiAction.value = action
                 aiResult.value = result
             } catch (ex: Exception) {
-                aiResult.value = "AI Review belum berhasil. Catatan tetap tersimpan.\\n\\n${ex.message ?: "Periksa koneksi dan backend Daybook."}"
+                aiResult.value = "AI Writing Assistant belum berhasil. Catatan tetap tersimpan.\\n\\n${ex.message ?: "Periksa koneksi dan backend Daybook."}"
             } finally {
                 aiLoading.value = false
             }
@@ -938,15 +940,30 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
                     // Mic button removed: recording now lives only in the Rekam tab
                     // (single recording path, see SYSTEM_FLOW.md §2).
 
-                    // AI Review button
-                    IconButton(
-                        onClick = { vm.reviewWithAI(context, title, richState.toHtml()) },
-                        enabled = !aiLoading && recordState == RecordState.IDLE &&
-                                (title.isNotBlank() || richState.toHtml().isNotBlank())
-                    ) {
-                        if (aiLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Default.AutoAwesome, "AI Review",
-                            tint = MaterialTheme.colorScheme.primary)
+                    // AI Writing Assistant
+                    var aiMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { aiMenu = true },
+                            enabled = !aiLoading && recordState == RecordState.IDLE &&
+                                (title.isNotBlank() || richState.toHtml().isNotBlank())) {
+                            if (aiLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            else Icon(Icons.Default.AutoAwesome, "AI Writing Assistant", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        DropdownMenu(expanded = aiMenu, onDismissRequest = { aiMenu = false }) {
+                            listOf(
+                                "improve" to "Perjelas & rapikan",
+                                "expand" to "Kembangkan ide",
+                                "organize" to "Susun terstruktur",
+                                "continue" to "Lanjutkan tulisan",
+                                "actions" to "Buat action items",
+                                "explain" to "Jelaskan lebih mudah"
+                            ).forEach { (action, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = {
+                                    aiMenu = false
+                                    vm.reviewWithAI(context, title, richState.toHtml(), action)
+                                })
+                            }
+                        }
                     }
 
                     // Delete
@@ -999,7 +1016,13 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
 
     // ── AI Review Sheet ────────────────────────────────────────────────────
     if (showAiSheet && aiResult != null) {
-        AiReviewSheet(result = aiResult!!, onClose = { showAiSheet = false; vm.clearAiResult() })
+        AiReviewSheet(result = aiResult!!, onClose = { showAiSheet = false; vm.clearAiResult() }, onApply = { append ->
+            val current = Html.fromHtml(richState.toHtml(), Html.FROM_HTML_MODE_LEGACY).toString().trim()
+            val combined = if (append && current.isNotBlank()) "$current\n\n${aiResult!!}" else aiResult!!
+            richState.setHtml(Html.escapeHtml(combined).replace("\n", "<br>"))
+            showAiSheet = false
+            vm.clearAiResult()
+        })
     }
 }
 
@@ -1157,25 +1180,41 @@ fun ColorPickerRow(richState: RichTextState) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiReviewSheet(result: String, onClose: () -> Unit) {
+fun AiReviewSheet(result: String, onClose: () -> Unit, onApply: (Boolean) -> Unit) {
+    var append by remember { mutableStateOf(true) }
     ModalBottomSheet(onDismissRequest = onClose) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("AI Review", style = MaterialTheme.typography.titleMedium)
+                    Column {
+                        Text("AI Writing Assistant", style = MaterialTheme.typography.titleMedium)
+                        Text("Hasil siap digunakan di catatan", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
+                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Tutup") }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            HorizontalDivider()
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 Text(result, style = MaterialTheme.typography.bodyMedium)
             }
+            Text("Terapkan hasil", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = append, onClick = { append = true }, label = { Text("Tambahkan") })
+                FilterChip(selected = !append, onClick = { append = false }, label = { Text("Ganti isi note") })
+            }
+            Button(onClick = { onApply(append) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Check, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Terapkan ke Notes")
+            }
+            TextButton(onClick = onClose, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Nanti") }
         }
     }
 }
-
 // ─── Standard Editor ─────────────────────────────────────────────────────────
 
 @Composable
