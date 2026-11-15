@@ -2,6 +2,13 @@ package com.example.daybook
 
 import android.Manifest
 import android.content.Context
+import android.app.Activity
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.firebase.auth.GoogleAuthProvider
 import android.text.Html
 import android.content.Intent
 import android.widget.Toast
@@ -159,6 +166,33 @@ class VM : ViewModel() {
     fun signUp(em: String, pw: String, fail: (String) -> Unit) {
         auth.createUserWithEmailAndPassword(em, pw).addOnFailureListener { fail(it.message ?: "Sign up failed") }
     }
+    fun signInWithGoogle(activity: Activity, fail: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val googleOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(activity.getString(R.string.default_web_client_id))
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleOption)
+                    .build()
+                val result = CredentialManager.create(activity).getCredential(
+                    context = activity,
+                    request = request
+                )
+                val credential = GoogleIdTokenCredential.createFrom(result.credential.data)
+                val firebaseCredential = GoogleAuthProvider.getCredential(credential.idToken, null)
+                auth.signInWithCredential(firebaseCredential)
+                    .addOnFailureListener { fail(it.message ?: "Google sign-in gagal.") }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    fail(e.localizedMessage ?: "Tidak dapat masuk dengan Google.")
+                }
+            }
+        }
+    }
+
     fun signOut() = auth.signOut()
     fun forgotPassword(em: String, onDone: (String?) -> Unit) {
         if (em.isBlank()) { onDone("Please enter your email first"); return }
@@ -1257,6 +1291,8 @@ fun Login(vm: VM) {
     var pw  by remember { mutableStateOf("") }
     var err by remember { mutableStateOf("") }
     var msg by remember { mutableStateOf("") }
+    var googleLoading by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as? Activity
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(24.dp), Arrangement.Center) {
         Text("Daybook", style = MaterialTheme.typography.headlineMedium)
@@ -1272,6 +1308,28 @@ fun Login(vm: VM) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ err = ""; msg = ""; vm.signIn(em.trim(), pw) { err = it } }) { Text("Sign in") }
             TextButton({ err = ""; msg = ""; vm.signUp(em.trim(), pw) { err = it } }) { Text("Create account") }
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = {
+                err = ""; msg = ""
+                if (activity == null) err = "Activity tidak tersedia."
+                else {
+                    googleLoading = true
+                    vm.signInWithGoogle(activity) { message ->
+                        googleLoading = false
+                        err = message
+                    }
+                }
+            },
+            enabled = !googleLoading && activity != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (googleLoading) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(if (googleLoading) "Menghubungkan..." else "Continue with Google")
         }
         TextButton(onClick = { err = ""; msg = ""; vm.forgotPassword(em) {
             if (it == null) msg = "Reset email sent! Check your inbox." else err = it
