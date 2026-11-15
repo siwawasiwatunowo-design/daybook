@@ -115,7 +115,10 @@ class SttWorker(
                 attempts++
 
                 val status = DaybookApiClient.getJobStatus(applicationContext, jobId)
-                if (status.status.equals("Completed", ignoreCase = true)) {
+                // NeedsReview is terminal: the transcript is saved, but quality checks
+                // or optional AI refinement/MoM require review. Do not poll until timeout.
+                if (status.status.equals("Completed", ignoreCase = true) ||
+                    status.status.equals("NeedsReview", ignoreCase = true)) {
                     completedJob = status
                     break
                 } else if (status.status.equals("Failed", ignoreCase = true)) {
@@ -177,7 +180,10 @@ class SttWorker(
                 r.copy(
                     status = "DONE",
                     mom = momJson,
-                    message = "Transkripsi selesai (Groq Whisper Large-V3)"
+                    message = if (completedJob.status.equals("NeedsReview", ignoreCase = true))
+                        "Transkrip selesai, tetapi perlu ditinjau. " + (completedJob.errorMessage ?: "")
+                    else
+                        "Transkripsi selesai (Groq Whisper Large-V3)"
                 )
             }
 
