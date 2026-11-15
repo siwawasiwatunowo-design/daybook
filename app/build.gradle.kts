@@ -13,8 +13,18 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        val rawApiUrl = (project.findProperty("DAYBOOK_API_BASE_URL") as? String)
+            ?.takeIf { it.isNotBlank() }
+            ?: System.getenv("DAYBOOK_API_BASE_URL")?.takeIf { it.isNotBlank() }
+            ?: "https://tubeless-gutless-unlined.ngrok-free.dev"
+        val cleanApiUrl = rawApiUrl.trim().trimEnd('/')
+        buildConfigField("String", "DAYBOOK_API_BASE_URL", "\"$cleanApiUrl\"")
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
