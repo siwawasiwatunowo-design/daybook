@@ -96,6 +96,23 @@ object DaybookApiClient {
         }
     }
 
+
+    fun coachSpeaking(context: Context, transcript: String): String {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val body = JSONObject().put("transcript", transcript).toString()
+        val request = Request.Builder().url("$baseUrl/api/speaking/coach")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA)).build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Speaking Coach gagal (HTTP ${response.code}): $responseBody")
+            return JSONObject(responseBody).optString("coaching")
+                .ifBlank { throw IOException("Speaking Coach mengembalikan hasil kosong.") }
+        }
+    }
+
     /**
      * Step 1: Request presigned S3 upload URL from daybook-api
      */
