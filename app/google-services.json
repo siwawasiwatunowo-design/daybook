@@ -12,7 +12,20 @@
           "package_name": "com.example.daybook"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "2849436950-1h3rj6a1s2h115jnd9d5le2jdin99jhl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.daybook",
+            "certificate_hash": "7feeace1de495001d98d5465a8cebb9e5ee6a0a2"
+          }
+        },
+        {
+          "client_id": "2849436950-9asr543apk958ebtuoam9cmlg8tidmqr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCtvAostgEcl9YpAf_LICxQLdenwu3akXA"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "2849436950-9asr543apk958ebtuoam9cmlg8tidmqr.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
