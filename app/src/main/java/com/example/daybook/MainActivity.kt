@@ -2,6 +2,7 @@ package com.example.daybook
 
 import android.Manifest
 import android.content.Context
+import android.text.Html
 import android.content.Intent
 import android.widget.Toast
 import android.net.Uri
@@ -758,7 +759,7 @@ fun Screen(t: String, vm: VM) {
                             supportingContent = {
                                 val line = when (t) {
                                     "block"  -> "${e.start} – ${e.end}"
-                                    "note"   -> e.tag + if (e.body.isNotBlank()) "\n${e.body.replace(Regex("<[^>]+>"), "").take(80)}" else ""
+                                    "note"   -> e.tag + if (e.body.isNotBlank()) "\n${Html.fromHtml(e.body, Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim().take(100)}" else ""
                                     "dream"  -> "${e.date}, ${e.tag}, sleep ${e.sleep}/5" + if (e.body.isNotBlank()) "\n${e.body.take(60)}" else ""
                                     else     -> e.tag + if (e.year > 0) ", ${e.year}" else ""
                                 }
