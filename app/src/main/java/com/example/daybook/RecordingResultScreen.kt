@@ -69,7 +69,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
 
     // Solo practice is evaluated automatically as soon as its transcript is ready.
     LaunchedEffect(rec.id, hasText, rec.coaching) {
-        if (rec.sessionType == "PRACTICE" && hasText && rec.coaching.isBlank() && !coachingLoading) {
+        if (rec.sessionType == "PRACTICE" && rec.status in setOf("DONE", "PARTIAL") && hasText && rec.coaching.isBlank() && !coachingLoading) {
             coachingLoading = true
             coachingError = null
             try {
