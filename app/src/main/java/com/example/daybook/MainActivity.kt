@@ -1411,7 +1411,7 @@ fun PracticeModeScreen(vm: VM) {
     var customTopic by rememberSaveable { mutableStateOf("") }
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
-    val practiceHistory = recordings.filter { it.title.startsWith("Practice —") }
+    val practiceHistory = recordings.filter { it.sessionType == "PRACTICE" }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
