@@ -329,7 +329,7 @@ class VM : ViewModel() {
 val TABS = listOf(
     Triple("block", "Timebox", "🗓"), Triple("note", "Notes", "📝"),
     Triple("dream", "Dreams", "🌙"), Triple("bucket", "Bucket list", "⭐"),
-    Triple("record", "Rekam", "🎙")
+    Triple("practice", "Practice", "🎯"), Triple("record", "Rekam", "🎙")
 )
 val TAGS = mapOf(
     "note"   to listOf("Journal", "Learning", "Thoughts", "Ideas"),
@@ -390,7 +390,7 @@ fun Home(vm: VM) {
         Box(Modifier.padding(pad).fillMaxSize()) {
             key(tab) {
                 val t = TABS[tab].first
-                if (t == "record") RecordingsScreen(vm) else Screen(t, vm)
+                when (t) { "record" -> RecordingsScreen(vm); "practice" -> PracticeModeScreen(vm); else -> Screen(t, vm) }
             }
         }
     }
@@ -726,9 +726,9 @@ private fun statusLabel(s: String): String = when (s) {
 }
 
 /** Starts the foreground recording service for a new session (title is automatic). */
-private fun startRecording(context: Context) {
+private fun startRecording(context: Context, customTitle: String? = null) {
     val id = System.currentTimeMillis().toString()
-    val title = "Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date())
+    val title = customTitle ?: ("Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date()))
     RecordingService.clearStartError()
     val intent = Intent(context, RecordingService::class.java).apply {
         action = RecordingService.ACTION_START
@@ -1379,5 +1379,188 @@ fun Login(vm: VM) {
             modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall)
         if (msg.isNotEmpty()) Text(msg, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+
+// ─── Speaking Practice V1 ────────────────────────────────────────────────────
+
+private data class PracticeTopic(val id: String, val title: String, val description: String, val prompt: String)
+
+private val PRACTICE_TOPICS = listOf(
+    PracticeTopic("problem", "Explain a Problem", "Latih menjelaskan masalah secara runtut.", "Jelaskan satu masalah yang pernah kamu hadapi: konteks, penyebab, dampak, dan solusi."),
+    PracticeTopic("idea", "Present an Idea", "Latih menyampaikan ide agar mudah dipahami.", "Presentasikan satu ide: masalah yang ingin diselesaikan, solusi, manfaat, dan langkah berikutnya."),
+    PracticeTopic("concept", "Explain a Concept", "Latih menjelaskan hal kompleks dengan sederhana.", "Pilih satu konsep yang kamu pahami. Jelaskan seolah-olah lawan bicaramu belum pernah mengenalnya."),
+    PracticeTopic("free", "Free Speaking", "Bicara bebas tentang hal yang sedang kamu pikirkan.", "Ceritakan apa pun yang sedang kamu pikirkan. Usahakan tetap memiliki pembukaan, isi, dan penutup.")
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PracticeModeScreen(vm: VM) {
+    val context = LocalContext.current
+    val live by RecordingService.live.collectAsState()
+    val recordings by RecordingRepository.recordings.collectAsState()
+    var selected by rememberSaveable { mutableStateOf("problem") }
+    var customTopic by rememberSaveable { mutableStateOf("") }
+    var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
+    val isPracticeRecording = live?.title?.startsWith("Practice —") == true
+    val practiceHistory = recordings.filter { it.title.startsWith("Practice —") }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants[Manifest.permission.RECORD_AUDIO] == true) {
+            val topic = if (selected == "custom") customTopic.trim()
+                else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
+            startRecording(context, "Practice — $topic")
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { RecordingRepository.reload() }
+    }
+
+    if (isPracticeRecording && live != null) {
+        val current = live!!
+        var confirmStop by remember { mutableStateOf(false) }
+        LaunchedEffect(confirmStop) { if (confirmStop) { delay(3000); confirmStop = false } }
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("SOLO PRACTICE", style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(20.dp))
+            Text(current.title.removePrefix("Practice — "), style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(12.dp))
+            Text("Sampaikan pemikiranmu dengan kata-katamu sendiri. Tidak perlu sempurna.",
+                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(28.dp))
+            Text(formatClock(current.elapsedMs), style = MaterialTheme.typography.displayLarge,
+                fontWeight = FontWeight.Bold)
+            Text("● Merekam latihan", color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(12.dp))
+            LinearProgressIndicator(progress = { current.level }, Modifier.fillMaxWidth().height(8.dp))
+            current.warning?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp)) }
+            Spacer(Modifier.weight(1f))
+            Text("Target latihan: 2–5 menit", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { if (confirmStop) stopRecording(context) else confirmStop = true },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text(if (confirmStop) "Tap lagi untuk selesai" else "Selesai latihan") }
+        }
+        return
+    }
+
+    openResultId?.let { id ->
+        RecordingResultScreen(id, vm) { openResultId = null }
+        return
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text("Speaking Practice", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("Latih cara berpikir dan menyampaikan ide. Mulai dari satu topik, bicara, lalu pelajari feedback-mu.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item { Text("Pilih latihan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+        items(PRACTICE_TOPICS, key = { it.id }) { topic ->
+            val active = selected == topic.id
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { selected = topic.id },
+                border = if (active) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                colors = CardDefaults.cardColors(
+                    containerColor = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(topic.title, fontWeight = FontWeight.SemiBold)
+                        Text(topic.description, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    RadioButton(selected = active, onClick = { selected = topic.id })
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Topik sendiri", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = customTopic, onValueChange = { customTopic = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Contoh: Jelaskan solusi untuk masalah keterlambatan proses...") },
+                        minLines = 2,
+                        enabled = true
+                    )
+                    TextButton(onClick = { selected = "custom" }) {
+                        Text(if (selected == "custom") "Topik kustom dipilih ✓" else "Gunakan topik ini")
+                    }
+                }
+            }
+        }
+        item {
+            val prompt = if (selected == "custom") customTopic.trim()
+                else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty()
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Tantanganmu", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(6.dp))
+                    Text(prompt.ifBlank { "Isi topik kustom terlebih dahulu." })
+                    Spacer(Modifier.height(8.dp))
+                    Text("Saran: bicara 2–5 menit. Susun konteks, poin utama, alasan atau contoh, lalu simpulkan.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        item {
+            Button(
+                onClick = {
+                    if (selected == "custom" && customTopic.isBlank()) {
+                        Toast.makeText(context, "Isi topik latihan terlebih dahulu.", Toast.LENGTH_SHORT).show()
+                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        val topic = if (selected == "custom") customTopic.trim()
+                            else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
+                        startRecording(context, "Practice — $topic")
+                    } else permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
+                },
+                modifier = Modifier.fillMaxWidth().height(54.dp)
+            ) {
+                Icon(Icons.Default.Mic, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Mulai latihan")
+            }
+        }
+        item {
+            Text("Riwayat latihan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
+        if (practiceHistory.isEmpty()) item {
+            Text("Belum ada latihan. Sesi pertamamu akan muncul di sini.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        items(practiceHistory, key = { it.id }) { rec ->
+            ListItem(
+                modifier = Modifier.clickable { openResultId = rec.id },
+                headlineContent = { Text(rec.title.removePrefix("Practice — "), fontWeight = FontWeight.Medium) },
+                supportingContent = {
+                    Text("${formatClock(rec.chunks.sumOf { it.durationMs })} • ${statusLabel(rec.status)}")
+                },
+                trailingContent = {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Lihat latihan")
+                }
+            )
+            HorizontalDivider()
+        }
     }
 }
