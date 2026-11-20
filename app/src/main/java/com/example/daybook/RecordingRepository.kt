@@ -49,7 +49,10 @@ data class Recording(
     val chunks: List<Chunk> = emptyList(),
     val mom: String = "",           // JSON string of MoM (see MomExtractor.MoM)
     val marks: List<Mark> = emptyList(),
-    val message: String = ""        // human note, e.g. "Rekaman terputus di menit N"
+    val message: String = "",       // human note, e.g. "Rekaman terputus di menit N"
+    val sessionType: String = "MEETING", // MEETING | PRACTICE
+    val practicePrompt: String = "",
+    val coaching: String = ""
 )
 
 /** "62:15" or "1:02:15". */
@@ -175,6 +178,10 @@ object RecordingRepository {
     /** Total bytes of audio files on disk for a recording. */
     fun diskBytes(id: String): Long =
         dir(id).listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+
+    @Synchronized fun setCoaching(id: String, feedback: String) {
+        update(id) { it.copy(coaching = feedback) }
+    }
 
     @Synchronized fun setMom(id: String, momJson: String) {
         update(id) { it.copy(mom = momJson) }
@@ -311,7 +318,10 @@ object RecordingRepository {
                     .put("chunks", chunks)
                     .put("mom", r.mom)
                     .put("marks", marks)
-                    .put("message", r.message))
+                    .put("message", r.message)
+                    .put("sessionType", r.sessionType)
+                    .put("practicePrompt", r.practicePrompt)
+                    .put("coaching", r.coaching))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -371,7 +381,10 @@ object RecordingRepository {
                     chunks,
                     o.optString("mom", ""),
                     marks,
-                    o.optString("message", "")
+                    o.optString("message", ""),
+                    o.optString("sessionType", "MEETING"),
+                    o.optString("practicePrompt", ""),
+                    o.optString("coaching", "")
                 ))
             }
             _recordings.value = list
