@@ -726,7 +726,12 @@ private fun statusLabel(s: String): String = when (s) {
 }
 
 /** Starts the foreground recording service for a new session (title is automatic). */
-private fun startRecording(context: Context, customTitle: String? = null) {
+private fun startRecording(
+    context: Context,
+    customTitle: String? = null,
+    sessionType: String = "MEETING",
+    practicePrompt: String = ""
+) {
     val id = System.currentTimeMillis().toString()
     val title = customTitle ?: ("Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date()))
     RecordingService.clearStartError()
@@ -734,6 +739,8 @@ private fun startRecording(context: Context, customTitle: String? = null) {
         action = RecordingService.ACTION_START
         putExtra(RecordingService.EXTRA_ID, id)
         putExtra(RecordingService.EXTRA_TITLE, title)
+        putExtra(RecordingService.EXTRA_SESSION_TYPE, sessionType)
+        putExtra(RecordingService.EXTRA_PRACTICE_PROMPT, practicePrompt)
     }
     ContextCompat.startForegroundService(context, intent)
 }
@@ -1411,7 +1418,7 @@ fun PracticeModeScreen(vm: VM) {
         if (grants[Manifest.permission.RECORD_AUDIO] == true) {
             val topic = if (selected == "custom") customTopic.trim()
                 else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
-            startRecording(context, "Practice — $topic")
+            startRecording(context, "Practice — $topic", "PRACTICE", if (selected == "custom") "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic" else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty())
         }
     }
 
@@ -1532,7 +1539,7 @@ fun PracticeModeScreen(vm: VM) {
                         == PackageManager.PERMISSION_GRANTED) {
                         val topic = if (selected == "custom") customTopic.trim()
                             else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
-                        startRecording(context, "Practice — $topic")
+                        startRecording(context, "Practice — $topic", "PRACTICE", if (selected == "custom") "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic" else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty())
                     } else permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp)
