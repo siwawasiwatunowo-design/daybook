@@ -86,6 +86,8 @@ class RecordingService : Service() {
 
     private var recordingId: String = ""
     private var title: String = "Meeting"
+    private var sessionType: String = "MEETING"
+    private var practicePrompt: String = ""
     @Volatile private var endReason: String? = null   // non-null => recording was interrupted
 
     // writer-thread state
@@ -98,6 +100,8 @@ class RecordingService : Service() {
         const val CHANNEL_ID = "daybook_recording"
         const val EXTRA_ID = "id"
         const val EXTRA_TITLE = "title"
+        const val EXTRA_SESSION_TYPE = "session_type"
+        const val EXTRA_PRACTICE_PROMPT = "practice_prompt"
         const val EXTRA_MARK_TYPE = "mark_type"
         const val ACTION_START = "com.example.daybook.START"
         const val ACTION_STOP = "com.example.daybook.STOP"
@@ -167,6 +171,8 @@ class RecordingService : Service() {
 
         recordingId = intent.getStringExtra(EXTRA_ID) ?: System.currentTimeMillis().toString()
         title = tentativeTitle
+        sessionType = intent.getStringExtra(EXTRA_SESSION_TYPE) ?: "MEETING"
+        practicePrompt = intent.getStringExtra(EXTRA_PRACTICE_PROMPT).orEmpty()
         endReason = null
         finalizing.set(false); readerDone.set(false)
         samplesRead.set(0); queue.clear()
@@ -194,7 +200,11 @@ class RecordingService : Service() {
         activeId = recordingId
         RecordingRepository.setActive(recordingId)
         RecordingRepository.upsert(
-            Recording(recordingId, title, System.currentTimeMillis(), recordingId, "RECORDING")
+            Recording(
+                recordingId, title, System.currentTimeMillis(), recordingId, "RECORDING",
+                sessionType = sessionType,
+                practicePrompt = practicePrompt
+            )
         )
         acquireWakeLock()
         _live.value = LiveRecording(recordingId, title)

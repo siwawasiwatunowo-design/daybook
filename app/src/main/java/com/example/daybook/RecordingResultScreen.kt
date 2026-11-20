@@ -67,6 +67,25 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var coachingError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
+    // Solo practice is evaluated automatically as soon as its transcript is ready.
+    LaunchedEffect(rec.id, rec.status, hasText, rec.coaching) {
+        if (rec.sessionType == "PRACTICE" && rec.status in setOf("DONE", "PARTIAL") && hasText && rec.coaching.isBlank() && !coachingLoading) {
+            coachingLoading = true
+            coachingError = null
+            try {
+                val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
+                val feedback = withContext(Dispatchers.IO) {
+                    DaybookApiClient.coachSpeaking(context, speechText)
+                }
+                RecordingRepository.setCoaching(rec.id, feedback)
+            } catch (e: Exception) {
+                coachingError = e.message ?: "Evaluasi latihan belum berhasil."
+            } finally {
+                coachingLoading = false
+            }
+        }
+    }
+
     // Audio playback: all chunks as one timeline, same clock as the transcript segments.
     val player = remember(rec.id, rec.chunks.size) {
         RecordingPlayer(
@@ -183,6 +202,36 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         HorizontalDivider()
 
         LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+            if (rec.sessionType == "PRACTICE") item {
+                Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("SOLO PRACTICE", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
+                        if (rec.practicePrompt.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(rec.practicePrompt, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Evaluasi Speaking Coach", fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(6.dp))
+                        when {
+                            rec.coaching.isNotBlank() -> Text(rec.coaching, style = MaterialTheme.typography.bodyMedium)
+                            coachingLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("Mengevaluasi struktur, kejelasan, konteks, reasoning, keringkasan, dan kesimpulan…",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                            coachingError != null -> Text(coachingError!!, color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
+                            else -> Text("Evaluasi akan muncul setelah transkrip tersedia.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
             if (rec.mom.isNotBlank()) item {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
