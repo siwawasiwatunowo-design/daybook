@@ -73,7 +73,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             coachingLoading = true
             coachingError = null
             try {
-                val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\\n") { it.text }
+                val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
                 val feedback = withContext(Dispatchers.IO) {
                     DaybookApiClient.coachSpeaking(context, speechText)
                 }
