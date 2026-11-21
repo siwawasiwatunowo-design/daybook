@@ -131,6 +131,10 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (rec.message.isNotBlank()) {
+                        Text(rec.message, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error)
+                    }
                     Button(
                         onClick = {
                             retryQueued = true
