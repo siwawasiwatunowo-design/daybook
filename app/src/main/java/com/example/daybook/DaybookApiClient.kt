@@ -36,7 +36,10 @@ data class BackendJobStatus(
     val refinedTranscript: String,
     val momJson: String,
     val errorMessage: String?,
-    val chunks: List<BackendChunk>
+    val chunks: List<BackendChunk>,
+    val speakingCoachStatus: String = "NotRequested",
+    val speakingCoachResult: String = "",
+    val speakingCoachError: String? = null
 )
 
 object DaybookApiClient {
@@ -199,7 +202,9 @@ object DaybookApiClient {
         audioObjectName: String,
         durationSeconds: Int,
         activityCode: String = "GENERAL_MEETING",
-        language: String = "id"
+        language: String = "id",
+        enableSpeakingCoach: Boolean = false,
+        speakingCoachTopic: String? = null
     ): String {
         val baseUrl = DaybookApiConfig.getBaseUrl(context)
         val token = getAuthToken()
@@ -209,6 +214,10 @@ object DaybookApiClient {
             put("audioObjectName", audioObjectName)
             put("durationSeconds", durationSeconds)
             put("languageOverride", language)
+            put("enableSpeakingCoach", enableSpeakingCoach)
+            if (enableSpeakingCoach && !speakingCoachTopic.isNullOrBlank()) {
+                put("speakingCoachTopic", speakingCoachTopic)
+            }
         }.toString()
 
         val request = Request.Builder()
@@ -270,7 +279,13 @@ object DaybookApiClient {
                 refinedTranscript = json.optString("refinedTranscript", json.optString("RefinedTranscript", "")),
                 momJson = json.optString("momJson", json.optString("MomJson", "")),
                 errorMessage = json.optString("errorMessage", json.optString("ErrorMessage", null)),
-                chunks = chunkList
+                chunks = chunkList,
+                speakingCoachStatus = json.optString("speakingCoachStatus",
+                    json.optString("SpeakingCoachStatus", "NotRequested")),
+                speakingCoachResult = json.optString("speakingCoachResult",
+                    json.optString("SpeakingCoachResult", "")),
+                speakingCoachError = json.optString("speakingCoachError",
+                    json.optString("SpeakingCoachError", null))
             )
         }
     }
