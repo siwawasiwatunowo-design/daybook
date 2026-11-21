@@ -407,7 +407,6 @@ fun RecordingsScreen(vm: VM) {
     val live by RecordingService.live.collectAsState()
     val cur = live
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
-    var showProgress by rememberSaveable { mutableStateOf(false) }
     val resultId = openResultId
     if (cur != null) ActiveRecordingScreen(cur)
     else if (resultId != null) RecordingResultScreen(resultId, vm) { openResultId = null }
@@ -1418,6 +1417,7 @@ fun PracticeModeScreen(vm: VM) {
     var selected by rememberSaveable { mutableStateOf("problem") }
     var customTopic by rememberSaveable { mutableStateOf("") }
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProgress by rememberSaveable { mutableStateOf(false) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
     var cloudHistoryLoading by remember { mutableStateOf(true) }
     var cloudHistoryError by remember { mutableStateOf<String?>(null) }
