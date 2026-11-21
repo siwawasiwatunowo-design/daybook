@@ -105,7 +105,13 @@ class SttWorker(
                 activityCode = "GENERAL_MEETING",
                 language = "id",
                 enableSpeakingCoach = isSoloPractice,
-                speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null
+                speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null,
+                practiceTitle = if (isSoloPractice) rec.title else null,
+                practiceSessionId = if (isSoloPractice) rec.practiceSessionId else null,
+                practiceAttemptNumber = rec.attemptNumber,
+                practicePrompt = if (isSoloPractice) rec.practicePrompt else null,
+                practiceMode = if (isSoloPractice) rec.practiceMode else null,
+                sourceNoteId = if (isSoloPractice) rec.sourceNoteId else null
             )
             if (isSoloPractice) {
                 RecordingRepository.update(id) {
