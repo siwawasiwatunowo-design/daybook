@@ -730,7 +730,11 @@ private fun startRecording(
     context: Context,
     customTitle: String? = null,
     sessionType: String = "MEETING",
-    practicePrompt: String = ""
+    practicePrompt: String = "",
+    practiceSessionId: String = "",
+    attemptNumber: Int = 1,
+    practiceMode: String = "SOLO",
+    sourceNoteId: String = ""
 ) {
     val id = System.currentTimeMillis().toString()
     val title = customTitle ?: ("Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date()))
@@ -741,6 +745,10 @@ private fun startRecording(
         putExtra(RecordingService.EXTRA_TITLE, title)
         putExtra(RecordingService.EXTRA_SESSION_TYPE, sessionType)
         putExtra(RecordingService.EXTRA_PRACTICE_PROMPT, practicePrompt)
+        putExtra(RecordingService.EXTRA_PRACTICE_SESSION_ID, practiceSessionId.ifBlank { if (sessionType == "PRACTICE") id else "" })
+        putExtra(RecordingService.EXTRA_ATTEMPT_NUMBER, attemptNumber.coerceAtLeast(1))
+        putExtra(RecordingService.EXTRA_PRACTICE_MODE, practiceMode)
+        putExtra(RecordingService.EXTRA_SOURCE_NOTE_ID, sourceNoteId)
     }
     ContextCompat.startForegroundService(context, intent)
 }
@@ -1412,6 +1420,11 @@ fun PracticeModeScreen(vm: VM) {
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
     val practiceHistory = recordings.filter { it.sessionType == "PRACTICE" }
+    val practiceSessions = practiceHistory
+        .groupBy { it.practiceSessionId.ifBlank { it.id } }
+        .values
+        .mapNotNull { attempts -> attempts.maxByOrNull { it.createdAt }?.let { latest -> latest to attempts.size } }
+        .sortedByDescending { it.first.createdAt }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -1556,15 +1569,15 @@ fun PracticeModeScreen(vm: VM) {
             Text("Belum ada latihan. Sesi pertamamu akan muncul di sini.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
-        items(practiceHistory, key = { it.id }) { rec ->
+        items(practiceSessions, key = { it.first.practiceSessionId.ifBlank { it.first.id } }) { (rec, attemptCount) ->
             ListItem(
                 modifier = Modifier.clickable { openResultId = rec.id },
                 headlineContent = { Text(rec.title.removePrefix("Practice — "), fontWeight = FontWeight.Medium) },
                 supportingContent = {
-                    Text("${formatClock(rec.chunks.sumOf { it.durationMs })} • ${statusLabel(rec.status)}")
+                    Text("$attemptCount percobaan • ${formatClock(rec.chunks.sumOf { it.durationMs })} • ${statusLabel(rec.status)}")
                 },
                 trailingContent = {
-                    Icon(Icons.Default.ChevronRight, contentDescription = "Lihat latihan")
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Lihat sesi latihan")
                 }
             )
             HorizontalDivider()

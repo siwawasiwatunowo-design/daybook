@@ -88,6 +88,8 @@ class RecordingService : Service() {
     private var title: String = "Meeting"
     private var sessionType: String = "MEETING"
     private var practicePrompt: String = ""
+    private var practiceSessionId: String = ""
+    private var attemptNumber: Int = 1
     @Volatile private var endReason: String? = null   // non-null => recording was interrupted
 
     // writer-thread state
@@ -102,6 +104,10 @@ class RecordingService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_SESSION_TYPE = "session_type"
         const val EXTRA_PRACTICE_PROMPT = "practice_prompt"
+        const val EXTRA_PRACTICE_SESSION_ID = "practice_session_id"
+        const val EXTRA_ATTEMPT_NUMBER = "attempt_number"
+        const val EXTRA_PRACTICE_MODE = "practice_mode"
+        const val EXTRA_SOURCE_NOTE_ID = "source_note_id"
         const val EXTRA_MARK_TYPE = "mark_type"
         const val ACTION_START = "com.example.daybook.START"
         const val ACTION_STOP = "com.example.daybook.STOP"
@@ -173,6 +179,8 @@ class RecordingService : Service() {
         title = tentativeTitle
         sessionType = intent.getStringExtra(EXTRA_SESSION_TYPE) ?: "MEETING"
         practicePrompt = intent.getStringExtra(EXTRA_PRACTICE_PROMPT).orEmpty()
+        practiceSessionId = intent.getStringExtra(EXTRA_PRACTICE_SESSION_ID).orEmpty().ifBlank { recordingId }
+        attemptNumber = intent.getIntExtra(EXTRA_ATTEMPT_NUMBER, 1).coerceAtLeast(1)
         endReason = null
         finalizing.set(false); readerDone.set(false)
         samplesRead.set(0); queue.clear()
@@ -203,7 +211,11 @@ class RecordingService : Service() {
             Recording(
                 recordingId, title, System.currentTimeMillis(), recordingId, "RECORDING",
                 sessionType = sessionType,
-                practicePrompt = practicePrompt
+                practicePrompt = practicePrompt,
+                practiceSessionId = practiceSessionId,
+                attemptNumber = attemptNumber,
+                practiceMode = intent.getStringExtra(EXTRA_PRACTICE_MODE) ?: "SOLO",
+                sourceNoteId = intent.getStringExtra(EXTRA_SOURCE_NOTE_ID).orEmpty()
             )
         )
         acquireWakeLock()

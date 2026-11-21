@@ -52,7 +52,11 @@ data class Recording(
     val message: String = "",       // human note, e.g. "Rekaman terputus di menit N"
     val sessionType: String = "MEETING", // MEETING | PRACTICE
     val practicePrompt: String = "",
-    val coaching: String = ""
+    val coaching: String = "",
+    val practiceSessionId: String = "",
+    val attemptNumber: Int = 1,
+    val practiceMode: String = "SOLO",
+    val sourceNoteId: String = ""
 )
 
 /** "62:15" or "1:02:15". */
@@ -321,7 +325,11 @@ object RecordingRepository {
                     .put("message", r.message)
                     .put("sessionType", r.sessionType)
                     .put("practicePrompt", r.practicePrompt)
-                    .put("coaching", r.coaching))
+                    .put("coaching", r.coaching)
+                    .put("practiceSessionId", r.practiceSessionId)
+                    .put("attemptNumber", r.attemptNumber)
+                    .put("practiceMode", r.practiceMode)
+                    .put("sourceNoteId", r.sourceNoteId))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -384,7 +392,11 @@ object RecordingRepository {
                     o.optString("message", ""),
                     o.optString("sessionType", "MEETING"),
                     o.optString("practicePrompt", ""),
-                    o.optString("coaching", "")
+                    o.optString("coaching", ""),
+                    o.optString("practiceSessionId", ""),
+                    o.optInt("attemptNumber", 1),
+                    o.optString("practiceMode", "SOLO"),
+                    o.optString("sourceNoteId", "")
                 ))
             }
             _recordings.value = list
