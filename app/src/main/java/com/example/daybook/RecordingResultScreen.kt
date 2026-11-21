@@ -1,6 +1,8 @@
 package com.example.daybook
 
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.Manifest
 import android.text.TextUtils
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -22,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +52,13 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     val recs by RecordingRepository.recordings.collectAsState()
     val rec = recs.firstOrNull { it.id == recordingId }
 
+    // All attempts belonging to the same practice session, including legacy V1 sessions.
+    val sessionKey = rec?.practiceSessionId?.ifBlank { rec.id }.orEmpty()
+    val sessionAttempts = recs.filter {
+        it.sessionType == "PRACTICE" &&
+            (it.practiceSessionId.ifBlank { it.id }) == sessionKey
+    }.sortedBy { it.attemptNumber }
+
     // Recording was deleted while this screen was open.
     LaunchedEffect(rec == null) { if (rec == null) onClose() }
     if (rec == null) return
@@ -65,6 +75,9 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var coaching by remember { mutableStateOf<String?>(null) }
     var coachingLoading by remember { mutableStateOf(false) }
     var coachingError by remember { mutableStateOf<String?>(null) }
+    var comparison by remember { mutableStateOf<String?>(null) }
+    var comparisonLoading by remember { mutableStateOf(false) }
+    var comparisonError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     // Solo practice is evaluated automatically as soon as its transcript is ready.
@@ -133,6 +146,74 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             ) {
                 if (coachingLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 else Text("Speaking Coach")
+            }
+        }
+
+        if (rec.sessionType == "PRACTICE") {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Attempt ${rec.attemptNumber} • ${sessionAttempts.size} percobaan",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (sessionAttempts.size >= 2) {
+                    OutlinedButton(
+                        enabled = !comparisonLoading,
+                        onClick = {
+                            val pair = sessionAttempts.takeLast(2)
+                            val earlier = RecordingRepository.fullTranscript(pair.first().id)
+                            val later = RecordingRepository.fullTranscript(pair.last().id)
+                            if (earlier.isBlank() || later.isBlank()) {
+                                comparisonError = "Kedua percobaan harus memiliki transkrip sebelum dibandingkan."
+                            } else {
+                                comparisonLoading = true
+                                comparisonError = null
+                                scope.launch {
+                                    try {
+                                        comparison = withContext(Dispatchers.IO) {
+                                            DaybookApiClient.compareSpeakingAttempts(
+                                                context, earlier, later,
+                                                pair.last().practicePrompt.ifBlank { pair.last().title }
+                                            )
+                                        }
+                                    } catch (e: Exception) {
+                                        comparisonError = e.message ?: "Perbandingan belum berhasil."
+                                    } finally {
+                                        comparisonLoading = false
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        if (comparisonLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Text("Bandingkan 2 terbaru")
+                    }
+                }
+                OutlinedButton(
+                    enabled = rec.status in setOf("DONE", "PARTIAL") && hasText &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                    onClick = {
+                        val newId = System.currentTimeMillis().toString()
+                        val intent = Intent(context, RecordingService::class.java).apply {
+                            action = RecordingService.ACTION_START
+                            putExtra(RecordingService.EXTRA_ID, newId)
+                            putExtra(RecordingService.EXTRA_TITLE, rec.title)
+                            putExtra(RecordingService.EXTRA_SESSION_TYPE, "PRACTICE")
+                            putExtra(RecordingService.EXTRA_PRACTICE_PROMPT, rec.practicePrompt)
+                            putExtra(RecordingService.EXTRA_PRACTICE_SESSION_ID, sessionKey)
+                            putExtra(RecordingService.EXTRA_ATTEMPT_NUMBER, (sessionAttempts.maxOfOrNull { it.attemptNumber } ?: rec.attemptNumber) + 1)
+                            putExtra(RecordingService.EXTRA_PRACTICE_MODE, rec.practiceMode)
+                            putExtra(RecordingService.EXTRA_SOURCE_NOTE_ID, rec.sourceNoteId)
+                        }
+                        onClose()
+                        context.startForegroundService(intent)
+                    }
+                ) { Text("Ulangi latihan") }
             }
         }
 
@@ -305,6 +386,30 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     coachingError?.let { message ->
         AlertDialog(onDismissRequest = { coachingError = null }, title = { Text("Speaking Coach") },
             text = { Text(message) }, confirmButton = { TextButton(onClick = { coachingError = null }) { Text("OK") } })
+    }
+
+    comparison?.let { report ->
+        AlertDialog(
+            onDismissRequest = { comparison = null },
+            title = { Text("Perbandingan Speaking Practice") },
+            text = {
+                Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    Text("Membandingkan dua percobaan terbaru dalam topik latihan yang sama.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+                    Text(report, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = { TextButton(onClick = { comparison = null }) { Text("Tutup") } }
+        )
+    }
+    comparisonError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { comparisonError = null },
+            title = { Text("Perbandingan Speaking Practice") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { comparisonError = null }) { Text("OK") } }
+        )
     }
 
     if (showSaveDialog) {
