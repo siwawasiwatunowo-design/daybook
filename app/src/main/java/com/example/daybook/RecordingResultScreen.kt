@@ -76,6 +76,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var comparison by remember { mutableStateOf<String?>(null) }
     var comparisonLoading by remember { mutableStateOf(false) }
     var comparisonError by remember { mutableStateOf<String?>(null) }
+    var retryQueued by remember(rec.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Solo Practice Speaking Coach is produced by the existing backend Recording job pipeline.
@@ -111,6 +112,46 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         }
 
         if (rec.backendJobId.isNotBlank()) RecordingProcessingTimeline(rec)
+
+        val canRetryProcessing = rec.status in setOf("FAILED", "PARTIAL") &&
+            (rec.backendJobId.isNotBlank() || (!rec.cloudOnly && rec.chunks.isNotEmpty()))
+        if (canRetryProcessing) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Rekamanmu tetap tersimpan", style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (rec.backendJobId.isNotBlank())
+                            "Pemrosesan server belum berhasil. Coba lagi dengan job dan audio yang sama; bagian yang sudah selesai akan dipertahankan."
+                        else
+                            "Audio masih tersimpan di perangkat. Daybook akan mengirim ulang audio ini tanpa meminta kamu merekam dari awal.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = {
+                            retryQueued = true
+                            RecordingRepository.update(rec.id) {
+                                it.copy(status = "PROCESSING", message = "Retry diminta. Menyiapkan pemrosesan ulang…")
+                            }
+                            SttWorker.enqueue(context, rec.id)
+                            Toast.makeText(context, "Pemrosesan ulang dimulai", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = !retryQueued,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (retryQueued) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Retry sedang disiapkan…")
+                        } else Text("Coba proses ulang")
+                    }
+                }
+            }
+        }
 
         if (rec.sessionType != "PRACTICE") {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
