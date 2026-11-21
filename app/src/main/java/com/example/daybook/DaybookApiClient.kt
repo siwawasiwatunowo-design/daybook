@@ -58,6 +58,35 @@ data class SpeakingCoachEvaluationRecord(
     val completedAt: String
 )
 
+data class PracticeWeekProgress(
+    val weekStart: String,
+    val sessions: Int,
+    val attempts: Int,
+    val practiceSeconds: Int,
+    val evaluatedAttempts: Int
+)
+
+data class PracticeEvaluationSummary(
+    val evaluationId: String,
+    val recordingJobId: String,
+    val title: String,
+    val attemptNumber: Int,
+    val version: Int,
+    val result: String,
+    val createdAt: String
+)
+
+data class PracticeProgressData(
+    val totalSessions: Int,
+    val totalAttempts: Int,
+    val totalPracticeSeconds: Long,
+    val evaluatedAttempts: Int,
+    val pendingEvaluations: Int,
+    val lastPracticeAt: String,
+    val weeks: List<PracticeWeekProgress>,
+    val latestEvaluations: List<PracticeEvaluationSummary>
+)
+
 object DaybookApiClient {
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
     private val WAV_MEDIA = "audio/wav".toMediaType()
@@ -116,6 +145,57 @@ object DaybookApiClient {
     }
 
 
+
+    /** Account-scoped aggregate for the Speaking Practice progress dashboard. */
+    fun getPracticeProgress(context: Context): PracticeProgressData {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val request = Request.Builder()
+            .url("$baseUrl/api/practice/progress")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .get().build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful)
+                throw IOException("Gagal mengambil progress Practice (HTTP ${response.code}): $body")
+            val json = JSONObject(body)
+            val weeksJson = json.optJSONArray("weeks") ?: JSONArray()
+            val weeks = (0 until weeksJson.length()).map { i ->
+                val item = weeksJson.getJSONObject(i)
+                PracticeWeekProgress(
+                    weekStart = item.optString("weekStart"),
+                    sessions = item.optInt("sessions"),
+                    attempts = item.optInt("attempts"),
+                    practiceSeconds = item.optInt("practiceSeconds"),
+                    evaluatedAttempts = item.optInt("evaluatedAttempts")
+                )
+            }
+            val evalJson = json.optJSONArray("latestEvaluations") ?: JSONArray()
+            val evaluations = (0 until evalJson.length()).map { i ->
+                val item = evalJson.getJSONObject(i)
+                PracticeEvaluationSummary(
+                    evaluationId = item.optString("evaluationId"),
+                    recordingJobId = item.optString("recordingJobId"),
+                    title = item.optString("title"),
+                    attemptNumber = item.optInt("attemptNumber", 1),
+                    version = item.optInt("version", 1),
+                    result = item.optString("result"),
+                    createdAt = item.optString("createdAt")
+                )
+            }
+            return PracticeProgressData(
+                totalSessions = json.optInt("totalSessions"),
+                totalAttempts = json.optInt("totalAttempts"),
+                totalPracticeSeconds = json.optLong("totalPracticeSeconds"),
+                evaluatedAttempts = json.optInt("evaluatedAttempts"),
+                pendingEvaluations = json.optInt("pendingEvaluations"),
+                lastPracticeAt = json.optString("lastPracticeAt"),
+                weeks = weeks,
+                latestEvaluations = evaluations
+            )
+        }
+    }
 
     fun compareSpeakingAttempts(context: Context, earlierTranscript: String, laterTranscript: String, topic: String = ""): String {
         val baseUrl = DaybookApiConfig.getBaseUrl(context)
