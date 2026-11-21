@@ -97,17 +97,25 @@ class SttWorker(
                 it.copy(status = "PROCESSING", message = "Memproses transkripsi (Groq Whisper Large-V3)...")
             }
             setForeground(foregroundInfo("Mentranskrip via Groq Whisper Large-V3…"))
+            val isSoloPractice = rec.sessionType == "PRACTICE" && rec.practiceMode == "SOLO"
             val jobId = DaybookApiClient.submitJob(
                 context = applicationContext,
                 audioObjectName = uploadInfo.audioObjectName,
                 durationSeconds = durationSec,
                 activityCode = "GENERAL_MEETING",
-                language = "id"
+                language = "id",
+                enableSpeakingCoach = isSoloPractice,
+                speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null
             )
+            if (isSoloPractice) {
+                RecordingRepository.update(id) {
+                    it.copy(coachingStatus = "Queued", coachingError = "")
+                }
+            }
 
             // Step 4: Poll backend status until complete
             var attempts = 0
-            val maxAttempts = 120 // ~6 minutes maximum wait time
+            val maxAttempts = if (isSoloPractice) 180 else 120 // Practice allows up to 9 minutes; regular recordings stay unchanged.
             var completedJob: BackendJobStatus? = null
 
             while (attempts < maxAttempts) {
@@ -183,7 +191,10 @@ class SttWorker(
                     message = if (completedJob.status.equals("NeedsReview", ignoreCase = true))
                         "Transkrip selesai, tetapi perlu ditinjau. " + (completedJob.errorMessage ?: "")
                     else
-                        "Transkripsi selesai (Groq Whisper Large-V3)"
+                        "Transkripsi selesai (Groq Whisper Large-V3)",
+                    coaching = completedJob.speakingCoachResult,
+                    coachingStatus = completedJob.speakingCoachStatus,
+                    coachingError = completedJob.speakingCoachError.orEmpty()
                 )
             }
 

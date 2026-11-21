@@ -80,24 +80,8 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var comparisonError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    // Solo practice is evaluated automatically as soon as its transcript is ready.
-    LaunchedEffect(rec.id, rec.status, hasText, rec.coaching) {
-        if (rec.sessionType == "PRACTICE" && rec.status in setOf("DONE", "PARTIAL") && hasText && rec.coaching.isBlank() && !coachingLoading) {
-            coachingLoading = true
-            coachingError = null
-            try {
-                val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
-                val feedback = withContext(Dispatchers.IO) {
-                    DaybookApiClient.coachSpeaking(context, speechText)
-                }
-                RecordingRepository.setCoaching(rec.id, feedback)
-            } catch (e: Exception) {
-                coachingError = e.message ?: "Evaluasi latihan belum berhasil."
-            } finally {
-                coachingLoading = false
-            }
-        }
-    }
+    // Solo Practice Speaking Coach is produced by the existing backend Recording job pipeline.
+    // This screen only renders the persisted result; it does not launch a second synchronous request.
 
     // Audio playback: all chunks as one timeline, same clock as the transcript segments.
     val player = remember(rec.id, rec.chunks.size) {
@@ -131,21 +115,26 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
-                    coachingError = null
-                    coachingLoading = true
-                    scope.launch {
-                        try {
-                            val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
-                            coaching = withContext(Dispatchers.IO) { DaybookApiClient.coachSpeaking(context, speechText) }
-                        } catch (e: Exception) {
-                            coachingError = e.message ?: "Gagal menjalankan Speaking Coach."
-                        } finally { coachingLoading = false }
+                    if (rec.coaching.isNotBlank()) {
+                        coaching = rec.coaching
+                    } else {
+                        coachingError = null
+                        coachingLoading = true
+                        scope.launch {
+                            try {
+                                val speechText = if (segs.isEmpty()) fallback else segs.joinToString("\n") { it.text }
+                                coaching = withContext(Dispatchers.IO) { DaybookApiClient.coachSpeaking(context, speechText) }
+                            } catch (e: Exception) {
+                                coachingError = e.message ?: "Gagal menjalankan Speaking Coach."
+                            } finally { coachingLoading = false }
+                        }
                     }
                 },
-                enabled = hasText && !coachingLoading
+                enabled = hasText && !coachingLoading &&
+                    (rec.sessionType != "PRACTICE" || rec.coaching.isNotBlank() || rec.coachingStatus == "NotRequested")
             ) {
                 if (coachingLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                else Text("Speaking Coach")
+                else Text(if (rec.coaching.isNotBlank()) "Lihat Speaking Coach" else "Speaking Coach")
             }
         }
 
@@ -299,11 +288,19 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                         Spacer(Modifier.height(6.dp))
                         when {
                             rec.coaching.isNotBlank() -> Text(rec.coaching, style = MaterialTheme.typography.bodyMedium)
-                            coachingLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            rec.coachingStatus == "Queued" || rec.coachingStatus == "Processing" -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(10.dp))
                                 Text("Mengevaluasi struktur, kejelasan, konteks, reasoning, keringkasan, dan kesimpulan…",
                                     style = MaterialTheme.typography.bodySmall)
+                            }
+                            rec.coachingStatus == "Failed" -> Text(
+                                "Evaluasi belum berhasil: " + rec.coachingError.ifBlank { "Coba jalankan Speaking Coach kembali." },
+                                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            coachingLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("Mengevaluasi Speaking Coach…", style = MaterialTheme.typography.bodySmall)
                             }
                             coachingError != null -> Text(coachingError!!, color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall)
