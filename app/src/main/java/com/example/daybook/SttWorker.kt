@@ -55,71 +55,80 @@ class SttWorker(
         }
 
         try {
-            // Collect and prepare audio files
-            val chunkFiles = rec.chunks.sortedBy { it.index }
-                .map { RecordingRepository.chunkFile(id, it.fileName) }
-                .filter { it.exists() && it.length() > WavIO.HEADER_SIZE }
-
-            if (chunkFiles.isEmpty()) {
-                RecordingRepository.update(id) {
-                    it.copy(status = "FAILED", message = "File audio rekaman tidak ditemukan.")
-                }
-                return Result.failure()
-            }
-
-            // If there's 1 chunk use it directly, otherwise stitch all chunks into one WAV
-            val audioToUpload = if (chunkFiles.size == 1) {
-                chunkFiles.first()
-            } else {
-                val combined = File(RecordingRepository.dir(id), "stitched_recording.wav")
-                WavIO.stitchWavFiles(chunkFiles, combined)
-            }
-
-            val clientRecordingId = UUID.randomUUID().toString()
+            val isSoloPractice = rec.sessionType == "PRACTICE" && rec.practiceMode == "SOLO"
             val durationSec = (rec.chunks.sumOf { it.durationMs } / 1000).toInt().coerceAtLeast(1)
 
-            // Step 1: Request upload URL
-            RecordingRepository.update(id) {
-                it.copy(status = "PROCESSING", message = "Meminta upload URL...")
-            }
-            setForeground(foregroundInfo("Menyiapkan upload audio…"))
-            val uploadInfo = DaybookApiClient.createUploadUrl(applicationContext, clientRecordingId)
-
-            // Step 2: Upload audio bytes to presigned Neon S3 URL
-            RecordingRepository.update(id) {
-                it.copy(status = "PROCESSING", message = "Mengunggah audio ke cloud storage...")
-            }
-            setForeground(foregroundInfo("Mengunggah audio ke storage…"))
-            DaybookApiClient.uploadAudio(uploadInfo.uploadUrl, audioToUpload)
-
-            // Step 3: Trigger processing job on backend
-            RecordingRepository.update(id) {
-                it.copy(status = "PROCESSING", message = "Memproses transkripsi (Groq Whisper Large-V3)...")
-            }
-            setForeground(foregroundInfo("Mentranskrip via Groq Whisper Large-V3…"))
-            val isSoloPractice = rec.sessionType == "PRACTICE" && rec.practiceMode == "SOLO"
-            val jobId = DaybookApiClient.submitJob(
-                context = applicationContext,
-                audioObjectName = uploadInfo.audioObjectName,
-                durationSeconds = durationSec,
-                activityCode = "GENERAL_MEETING",
-                language = "id",
-                enableSpeakingCoach = isSoloPractice,
-                speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null,
-                practiceTitle = if (isSoloPractice) rec.title else null,
-                practiceSessionId = if (isSoloPractice) rec.practiceSessionId else null,
-                practiceAttemptNumber = rec.attemptNumber,
-                practicePrompt = if (isSoloPractice) rec.practicePrompt else null,
-                practiceMode = if (isSoloPractice) rec.practiceMode else null,
-                sourceNoteId = if (isSoloPractice) rec.sourceNoteId else null
-            )
-            if (isSoloPractice) {
+            // If a backend job already exists, retry that job in place. This avoids
+            // uploading audio or creating a second job when only server processing failed.
+            val jobId = if (rec.backendJobId.isNotBlank()) {
                 RecordingRepository.update(id) {
-                    it.copy(coachingStatus = "Queued", coachingError = "")
+                    it.copy(status = "PROCESSING", message = "Meminta server melanjutkan pemrosesan…")
                 }
-            }
+                setForeground(foregroundInfo("Mencoba ulang pemrosesan di server…"))
+                DaybookApiClient.retryRecording(applicationContext, rec.backendJobId)
+                rec.backendJobId
+            } else {
+                // No job was created yet (for example, the API rejected job creation).
+                // The local WAV is still intact, so safely submit it again from the saved audio.
+                val chunkFiles = rec.chunks.sortedBy { it.index }
+                    .map { RecordingRepository.chunkFile(id, it.fileName) }
+                    .filter { it.exists() && it.length() > WavIO.HEADER_SIZE }
 
-            RecordingRepository.update(id) { it.copy(backendJobId = jobId) }
+                if (chunkFiles.isEmpty()) {
+                    RecordingRepository.update(id) {
+                        it.copy(status = "FAILED", message = "File audio lokal tidak ditemukan. Rekaman ini tidak bisa dikirim ulang dari perangkat.")
+                    }
+                    return Result.failure()
+                }
+
+                val audioToUpload = if (chunkFiles.size == 1) {
+                    chunkFiles.first()
+                } else {
+                    val combined = File(RecordingRepository.dir(id), "stitched_recording.wav")
+                    WavIO.stitchWavFiles(chunkFiles, combined)
+                }
+
+                // Stable client ID means a retry uses the same storage object path.
+                val clientRecordingId = UUID.nameUUIDFromBytes("${user.uid}:$id".toByteArray()).toString()
+                RecordingRepository.update(id) {
+                    it.copy(status = "PROCESSING", message = "Meminta upload URL…")
+                }
+                setForeground(foregroundInfo("Menyiapkan upload audio…"))
+                val uploadInfo = DaybookApiClient.createUploadUrl(applicationContext, clientRecordingId)
+
+                RecordingRepository.update(id) {
+                    it.copy(status = "PROCESSING", message = "Mengunggah audio tersimpan ke cloud…")
+                }
+                setForeground(foregroundInfo("Mengunggah audio ke storage…"))
+                DaybookApiClient.uploadAudio(uploadInfo.uploadUrl, audioToUpload)
+
+                RecordingRepository.update(id) {
+                    it.copy(status = "PROCESSING", message = "Mengirim rekaman ke server…")
+                }
+                setForeground(foregroundInfo("Mengirim rekaman ke server…"))
+                val createdJobId = DaybookApiClient.submitJob(
+                    context = applicationContext,
+                    audioObjectName = uploadInfo.audioObjectName,
+                    durationSeconds = durationSec,
+                    activityCode = "GENERAL_MEETING",
+                    language = "id",
+                    enableSpeakingCoach = isSoloPractice,
+                    speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null,
+                    practiceTitle = if (isSoloPractice) rec.title else null,
+                    practiceSessionId = if (isSoloPractice) rec.practiceSessionId else null,
+                    practiceAttemptNumber = rec.attemptNumber,
+                    practicePrompt = if (isSoloPractice) rec.practicePrompt else null,
+                    practiceMode = if (isSoloPractice) rec.practiceMode else null,
+                    sourceNoteId = if (isSoloPractice) rec.sourceNoteId else null
+                )
+                if (isSoloPractice) {
+                    RecordingRepository.update(id) {
+                        it.copy(coachingStatus = "Queued", coachingError = "")
+                    }
+                }
+                RecordingRepository.update(id) { it.copy(backendJobId = createdJobId) }
+                createdJobId
+            }
 
             // Step 4: Poll backend status until transcript processing is complete
             var attempts = 0
