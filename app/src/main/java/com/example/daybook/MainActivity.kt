@@ -1446,6 +1446,12 @@ fun PracticeModeScreen(vm: VM) {
                     RecordingRepository.upsert(cloud.copy(
                         id = local.id,
                         dirName = local.dirName,
+                        title = local.title,
+                        practiceSessionId = local.practiceSessionId,
+                        attemptNumber = local.attemptNumber,
+                        practicePrompt = local.practicePrompt.ifBlank { cloud.practicePrompt },
+                        practiceMode = local.practiceMode,
+                        sourceNoteId = local.sourceNoteId,
                         chunks = if (local.chunks.isNotEmpty()) local.chunks.map { localChunk ->
                             val remoteChunk = cloud.chunks.firstOrNull { it.index == localChunk.index }
                             if (remoteChunk == null) localChunk else localChunk.copy(
