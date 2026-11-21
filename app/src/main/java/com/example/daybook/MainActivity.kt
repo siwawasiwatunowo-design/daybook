@@ -478,39 +478,9 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
     val context = LocalContext.current
     val recs by RecordingRepository.recordings.collectAsState()
 
-    // Refresh from durable storage each time this screen is entered. This is
-    // independent of Firebase sign-in/out and never deletes local audio.
+    // Refresh from durable storage each time this screen is entered.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { RecordingRepository.reload() }
-        try {
-            val cloudRecords = withContext(Dispatchers.IO) { DaybookApiClient.getPracticeHistory(context) }
-            cloudRecords.forEach { cloud ->
-                val local = RecordingRepository.recordings.value.firstOrNull { it.backendJobId == cloud.backendJobId }
-                if (local != null) {
-                    RecordingRepository.upsert(cloud.copy(
-                        id = local.id,
-                        dirName = local.dirName,
-                        chunks = if (local.chunks.isNotEmpty()) local.chunks.map { localChunk ->
-                            val remoteChunk = cloud.chunks.firstOrNull { it.index == localChunk.index }
-                            if (remoteChunk == null) localChunk else localChunk.copy(
-                                transcript = remoteChunk.transcript.ifBlank { localChunk.transcript },
-                                segments = if (localChunk.segments.isNotEmpty()) localChunk.segments else remoteChunk.segments,
-                                status = if (remoteChunk.transcript.isNotBlank()) "TRANSCRIBED" else localChunk.status
-                            )
-                        } else cloud.chunks,
-                        cloudOnly = local.chunks.isEmpty(),
-                        cloudDurationMs = cloud.cloudDurationMs
-                    ))
-                } else {
-                    RecordingRepository.upsert(cloud)
-                }
-            }
-            cloudHistoryError = null
-        } catch (e: Exception) {
-            cloudHistoryError = e.message ?: "Histori cloud belum dapat dimuat."
-        } finally {
-            cloudHistoryLoading = false
-        }
     }
     val startError by RecordingService.startError.collectAsState()
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -1476,8 +1446,15 @@ fun PracticeModeScreen(vm: VM) {
                     RecordingRepository.upsert(cloud.copy(
                         id = local.id,
                         dirName = local.dirName,
-                        chunks = if (local.chunks.any { it.transcript.isNotBlank() }) local.chunks else cloud.chunks,
-                        cloudOnly = false,
+                        chunks = if (local.chunks.isNotEmpty()) local.chunks.map { localChunk ->
+                            val remoteChunk = cloud.chunks.firstOrNull { it.index == localChunk.index }
+                            if (remoteChunk == null) localChunk else localChunk.copy(
+                                transcript = remoteChunk.transcript.ifBlank { localChunk.transcript },
+                                segments = if (localChunk.segments.isNotEmpty()) localChunk.segments else remoteChunk.segments,
+                                status = if (remoteChunk.transcript.isNotBlank()) "TRANSCRIBED" else localChunk.status
+                            )
+                        } else cloud.chunks,
+                        cloudOnly = local.chunks.isEmpty(),
                         cloudDurationMs = cloud.cloudDurationMs
                     ))
                 } else {
