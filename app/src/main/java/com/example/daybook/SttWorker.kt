@@ -65,7 +65,19 @@ class SttWorker(
                     it.copy(status = "PROCESSING", message = "Meminta server melanjutkan pemrosesan…")
                 }
                 setForeground(foregroundInfo("Mencoba ulang pemrosesan di server…"))
-                DaybookApiClient.retryRecording(applicationContext, rec.backendJobId)
+                try {
+                    DaybookApiClient.retryRecording(applicationContext, rec.backendJobId)
+                } catch (retryError: Exception) {
+                    // A local timeout can happen while the server is still working.
+                    // If the existing job is already queued/processing/completed, just
+                    // resume polling instead of showing a misleading retry failure.
+                    val current = runCatching {
+                        DaybookApiClient.getJobStatus(applicationContext, rec.backendJobId)
+                    }.getOrNull()
+                    if (current == null || current.status !in setOf("Queued", "Processing", "Completed", "NeedsReview")) {
+                        throw retryError
+                    }
+                }
                 rec.backendJobId
             } else {
                 // No job was created yet (for example, the API rejected job creation).
