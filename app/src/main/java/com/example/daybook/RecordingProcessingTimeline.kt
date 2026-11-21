@@ -85,6 +85,9 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
     var requestError by remember { mutableStateOf<String?>(null) }
     var expandedVersion by remember { mutableIntStateOf(-1) }
     val scope = rememberCoroutineScope()
+    val localTranscriptAvailable = remember(recording.id, recording.chunks) {
+        RecordingRepository.fullTranscript(recording.id).isNotBlank()
+    }
 
     suspend fun refreshHistory() {
         if (recording.backendJobId.isBlank()) return
@@ -146,10 +149,34 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
             else if (recording.coachingStatus == "NotRequested") Text("Evaluasi akan tersedia setelah transkrip diproses.",
                 style = MaterialTheme.typography.bodySmall)
             requestError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Button(onClick = { feedback = ""; requestError = null; showFeedbackDialog = true },
-                enabled = recording.backendJobId.isNotBlank() &&
-                    recording.coachingStatus !in setOf("Queued", "Processing", "RetryPending")) {
-                Text(if (history.isEmpty()) "Minta evaluasi" else "Evaluate Again")
+            Button(onClick = {
+                requestError = null
+                if (recording.backendJobId.isBlank()) {
+                    // Backward compatibility for older local-only practice recordings.
+                    submitting = true
+                    scope.launch {
+                        try {
+                            val transcript = RecordingRepository.fullTranscript(recording.id)
+                            val result = withContext(Dispatchers.IO) {
+                                DaybookApiClient.coachSpeaking(context, transcript)
+                            }
+                            RecordingRepository.update(recording.id) {
+                                it.copy(coaching = result, coachingStatus = "Completed", coachingError = "")
+                            }
+                        } catch (e: Exception) {
+                            requestError = e.message ?: "Speaking Coach belum berhasil."
+                        } finally { submitting = false }
+                    }
+                } else {
+                    feedback = ""
+                    showFeedbackDialog = true
+                }
+            }, enabled = if (recording.backendJobId.isBlank()) {
+                localTranscriptAvailable && !submitting
+            } else {
+                recording.coachingStatus !in setOf("Queued", "Processing", "RetryPending") && !submitting
+            }) {
+                Text(if (recording.backendJobId.isBlank()) "Jalankan Speaking Coach" else if (history.isEmpty()) "Minta evaluasi" else "Evaluate Again")
             }
             if (history.isNotEmpty()) {
                 HorizontalDivider()
