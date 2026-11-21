@@ -112,6 +112,9 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             }
         }
 
+        if (rec.backendJobId.isNotBlank()) RecordingProcessingTimeline(rec)
+
+        if (rec.sessionType != "PRACTICE") {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
@@ -136,6 +139,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                 if (coachingLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 else Text(if (rec.coaching.isNotBlank()) "Lihat Speaking Coach" else "Speaking Coach")
             }
+        }
         }
 
         if (rec.sessionType == "PRACTICE") {
@@ -273,42 +277,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
 
         LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
             if (rec.sessionType == "PRACTICE") item {
-                Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("SOLO PRACTICE", style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary)
-                        if (rec.practicePrompt.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(rec.practicePrompt, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Text("Evaluasi Speaking Coach", fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(6.dp))
-                        when {
-                            rec.coaching.isNotBlank() -> Text(rec.coaching, style = MaterialTheme.typography.bodyMedium)
-                            rec.coachingStatus == "Queued" || rec.coachingStatus == "Processing" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(10.dp))
-                                Text("Mengevaluasi struktur, kejelasan, konteks, reasoning, keringkasan, dan kesimpulan…",
-                                    style = MaterialTheme.typography.bodySmall)
-                            }
-                            rec.coachingStatus == "Failed" -> Text(
-                                "Evaluasi belum berhasil: " + rec.coachingError.ifBlank { "Coba jalankan Speaking Coach kembali." },
-                                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                            coachingLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(10.dp))
-                                Text("Mengevaluasi Speaking Coach…", style = MaterialTheme.typography.bodySmall)
-                            }
-                            coachingError != null -> Text(coachingError!!, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall)
-                            else -> Text("Evaluasi akan muncul setelah transkrip tersedia.",
-                                style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
+                SpeakingCoachReviewPanel(context, rec)
             }
             if (rec.mom.isNotBlank()) item {
                 Card(

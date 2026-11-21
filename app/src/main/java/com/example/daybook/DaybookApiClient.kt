@@ -39,7 +39,23 @@ data class BackendJobStatus(
     val chunks: List<BackendChunk>,
     val speakingCoachStatus: String = "NotRequested",
     val speakingCoachResult: String = "",
-    val speakingCoachError: String? = null
+    val speakingCoachError: String? = null,
+    val processingStage: String = "AudioUploaded",
+    val processingStep: Int = 1,
+    val processingTotalSteps: Int = 7,
+    val processingDetail: String = ""
+)
+
+data class SpeakingCoachEvaluationRecord(
+    val id: String,
+    val version: Int,
+    val feedback: String,
+    val status: String,
+    val result: String,
+    val error: String,
+    val attemptCount: Int,
+    val createdAt: String,
+    val completedAt: String
 )
 
 object DaybookApiClient {
@@ -285,8 +301,59 @@ object DaybookApiClient {
                 speakingCoachResult = json.optString("speakingCoachResult",
                     json.optString("SpeakingCoachResult", "")),
                 speakingCoachError = json.optString("speakingCoachError",
-                    json.optString("SpeakingCoachError", null))
+                    json.optString("SpeakingCoachError", null)),
+                processingStage = json.optString("processingStage", json.optString("ProcessingStage", "AudioUploaded")),
+                processingStep = json.optInt("processingStep", json.optInt("ProcessingStep", 1)),
+                processingTotalSteps = json.optInt("processingTotalSteps", json.optInt("ProcessingTotalSteps", 7)),
+                processingDetail = json.optString("processingDetail", json.optString("ProcessingDetail", ""))
             )
+        }
+    }
+
+    fun requestSpeakingCoachEvaluation(context: Context, recordingJobId: String, feedback: String): Int {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val body = JSONObject().put("feedback", feedback).toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/recordings/$recordingJobId/speaking-coach/evaluations")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA))
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Evaluasi ulang gagal (HTTP ${response.code}): $responseBody")
+            return JSONObject(responseBody).optInt("version", 0)
+        }
+    }
+
+    fun getSpeakingCoachEvaluations(context: Context, recordingJobId: String): List<SpeakingCoachEvaluationRecord> {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val request = Request.Builder()
+            .url("$baseUrl/api/recordings/$recordingJobId/speaking-coach/evaluations")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .get()
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Gagal mengambil riwayat evaluasi (HTTP ${response.code}): $responseBody")
+            val array = JSONArray(responseBody)
+            return (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                SpeakingCoachEvaluationRecord(
+                    id = item.optString("id"),
+                    version = item.optInt("version"),
+                    feedback = item.optString("feedback").takeUnless { it == "null" }.orEmpty(),
+                    status = item.optString("status"),
+                    result = item.optString("result").takeUnless { it == "null" }.orEmpty(),
+                    error = item.optString("error").takeUnless { it == "null" }.orEmpty(),
+                    attemptCount = item.optInt("attemptCount"),
+                    createdAt = item.optString("createdAt"),
+                    completedAt = item.optString("completedAt")
+                )
+            }
         }
     }
 
