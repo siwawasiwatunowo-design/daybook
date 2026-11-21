@@ -407,6 +407,7 @@ fun RecordingsScreen(vm: VM) {
     val live by RecordingService.live.collectAsState()
     val cur = live
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProgress by rememberSaveable { mutableStateOf(false) }
     val resultId = openResultId
     if (cur != null) ActiveRecordingScreen(cur)
     else if (resultId != null) RecordingResultScreen(resultId, vm) { openResultId = null }
@@ -1517,15 +1518,38 @@ fun PracticeModeScreen(vm: VM) {
         return
     }
 
+    if (showProgress) {
+        PracticeProgressScreen(
+            onBack = { showProgress = false },
+            onOpenRecording = { backendJobId ->
+                val recording = RecordingRepository.recordings.value.firstOrNull {
+                    it.backendJobId == backendJobId
+                }
+                if (recording != null) {
+                    showProgress = false
+                    openResultId = recording.id
+                }
+            }
+        )
+        return
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("Speaking Practice", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Latih cara berpikir dan menyampaikan ide. Mulai dari satu topik, bicara, lalu pelajari feedback-mu.",
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Speaking Practice", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("Latih cara berpikir dan menyampaikan ide. Mulai dari satu topik, bicara, lalu pelajari feedback-mu.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(onClick = { showProgress = true }) {
+                    Text("Progress")
+                }
+            }
         }
         item { Text("Pilih latihan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
         items(PRACTICE_TOPICS, key = { it.id }) { topic ->
