@@ -490,8 +490,15 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
                     RecordingRepository.upsert(cloud.copy(
                         id = local.id,
                         dirName = local.dirName,
-                        chunks = if (local.chunks.any { it.transcript.isNotBlank() }) local.chunks else cloud.chunks,
-                        cloudOnly = false,
+                        chunks = if (local.chunks.isNotEmpty()) local.chunks.map { localChunk ->
+                            val remoteChunk = cloud.chunks.firstOrNull { it.index == localChunk.index }
+                            if (remoteChunk == null) localChunk else localChunk.copy(
+                                transcript = remoteChunk.transcript.ifBlank { localChunk.transcript },
+                                segments = if (localChunk.segments.isNotEmpty()) localChunk.segments else remoteChunk.segments,
+                                status = if (remoteChunk.transcript.isNotBlank()) "TRANSCRIBED" else localChunk.status
+                            )
+                        } else cloud.chunks,
+                        cloudOnly = local.chunks.isEmpty(),
                         cloudDurationMs = cloud.cloudDurationMs
                     ))
                 } else {
