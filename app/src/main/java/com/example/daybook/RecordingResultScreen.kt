@@ -274,10 +274,10 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         HorizontalDivider()
 
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            if (rec.sessionType == "PRACTICE") item {
+            if (rec.sessionType == "PRACTICE") {
                 SpeakingCoachReviewPanel(context, rec)
             }
-            if (rec.mom.isNotBlank()) item {
+            if (rec.mom.isNotBlank()) {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -289,17 +289,17 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                     }
                 }
             }
-            if (failed.isNotEmpty()) item {
+            if (failed.isNotEmpty()) {
                 Text("Bagian ${failed.joinToString { it.index.toString() }} gagal ditranskrip.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
             }
-            if (pending.isNotEmpty()) item {
+            if (pending.isNotEmpty()) {
                 Text("Bagian ${pending.joinToString { it.index.toString() }} belum selesai diproses.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
             }
-            if (!hasText) item {
+            if (!hasText) {
                 Text("Belum ada teks. Bisa jadi tidak ada ucapan yang terdeteksi, atau transkripsi belum selesai.",
                     Modifier.padding(vertical = 16.dp))
             } else if (segs.isEmpty()) {
