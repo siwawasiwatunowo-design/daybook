@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 
 @Composable
 fun RecordingProcessingTimeline(recording: Recording) {
@@ -83,6 +84,7 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
     var submitting by remember { mutableStateOf(false) }
     var requestError by remember { mutableStateOf<String?>(null) }
     var expandedVersion by remember { mutableIntStateOf(-1) }
+    val scope = rememberCoroutineScope()
 
     suspend fun refreshHistory() {
         if (recording.backendJobId.isBlank()) return
@@ -100,9 +102,11 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
     LaunchedEffect(recording.backendJobId, recording.coachingStatus) {
         val jobId = recording.backendJobId
         if (jobId.isBlank()) return@LaunchedEffect
-        while (recording.coachingStatus in setOf("Queued", "Processing", "RetryPending")) {
+        var currentStatus = recording.coachingStatus
+        while (currentStatus in setOf("Queued", "Processing", "RetryPending")) {
             try {
                 val status = withContext(Dispatchers.IO) { DaybookApiClient.getJobStatus(context, jobId) }
+                currentStatus = status.speakingCoachStatus
                 RecordingRepository.update(recording.id) { current ->
                     current.copy(
                         coaching = status.speakingCoachResult.ifBlank { current.coaching },
@@ -144,7 +148,7 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
             requestError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Button(onClick = { feedback = ""; requestError = null; showFeedbackDialog = true },
                 enabled = recording.backendJobId.isNotBlank() &&
-                    recording.coachingStatus !in setOf("Queued", "Processing")) {
+                    recording.coachingStatus !in setOf("Queued", "Processing", "RetryPending")) {
                 Text(if (history.isEmpty()) "Minta evaluasi" else "Evaluate Again")
             }
             if (history.isNotEmpty()) {
@@ -202,7 +206,7 @@ fun SpeakingCoachReviewPanel(context: Context, recording: Recording) {
                     submitting = true
                     requestError = null
                     val note = feedback.trim()
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                    scope.launch {
                         try {
                             val version = withContext(Dispatchers.IO) {
                                 DaybookApiClient.requestSpeakingCoachEvaluation(context, recording.backendJobId, note)
