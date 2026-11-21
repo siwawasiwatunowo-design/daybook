@@ -478,8 +478,7 @@ fun RecordingsList(onOpenResult: (String) -> Unit) {
     val context = LocalContext.current
     val recs by RecordingRepository.recordings.collectAsState()
 
-    // Refresh from durable storage each time this screen is entered. This is
-    // independent of Firebase sign-in/out and never deletes local audio.
+    // Refresh from durable storage each time this screen is entered.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { RecordingRepository.reload() }
     }
@@ -1419,6 +1418,8 @@ fun PracticeModeScreen(vm: VM) {
     var customTopic by rememberSaveable { mutableStateOf("") }
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
+    var cloudHistoryLoading by remember { mutableStateOf(true) }
+    var cloudHistoryError by remember { mutableStateOf<String?>(null) }
     val practiceHistory = recordings.filter { it.sessionType == "PRACTICE" }
     val practiceSessions = practiceHistory
         .groupBy { it.practiceSessionId.ifBlank { it.id } }
@@ -1437,6 +1438,41 @@ fun PracticeModeScreen(vm: VM) {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { RecordingRepository.reload() }
+        try {
+            val cloudRecords = withContext(Dispatchers.IO) { DaybookApiClient.getPracticeHistory(context) }
+            cloudRecords.forEach { cloud ->
+                val local = RecordingRepository.recordings.value.firstOrNull { it.backendJobId == cloud.backendJobId }
+                if (local != null) {
+                    RecordingRepository.upsert(cloud.copy(
+                        id = local.id,
+                        dirName = local.dirName,
+                        title = local.title,
+                        practiceSessionId = local.practiceSessionId,
+                        attemptNumber = local.attemptNumber,
+                        practicePrompt = local.practicePrompt.ifBlank { cloud.practicePrompt },
+                        practiceMode = local.practiceMode,
+                        sourceNoteId = local.sourceNoteId,
+                        chunks = if (local.chunks.isNotEmpty()) local.chunks.map { localChunk ->
+                            val remoteChunk = cloud.chunks.firstOrNull { it.index == localChunk.index }
+                            if (remoteChunk == null) localChunk else localChunk.copy(
+                                transcript = remoteChunk.transcript.ifBlank { localChunk.transcript },
+                                segments = if (localChunk.segments.isNotEmpty()) localChunk.segments else remoteChunk.segments,
+                                status = if (remoteChunk.transcript.isNotBlank()) "TRANSCRIBED" else localChunk.status
+                            )
+                        } else cloud.chunks,
+                        cloudOnly = local.chunks.isEmpty(),
+                        cloudDurationMs = cloud.cloudDurationMs
+                    ))
+                } else {
+                    RecordingRepository.upsert(cloud)
+                }
+            }
+            cloudHistoryError = null
+        } catch (e: Exception) {
+            cloudHistoryError = e.message ?: "Histori cloud belum dapat dimuat."
+        } finally {
+            cloudHistoryLoading = false
+        }
     }
 
     if (isPracticeRecording && live != null) {
@@ -1566,15 +1602,21 @@ fun PracticeModeScreen(vm: VM) {
             Text("Riwayat latihan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
         if (practiceHistory.isEmpty()) item {
-            Text("Belum ada latihan. Sesi pertamamu akan muncul di sini.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text(
+                when {
+                    cloudHistoryLoading -> "Memuat histori latihan dari akunmu…"
+                    cloudHistoryError != null -> "Histori cloud belum dapat dimuat. Periksa koneksi lalu buka kembali tab Practice."
+                    else -> "Belum ada latihan. Sesi pertamamu akan muncul di sini."
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall
+            )
         }
         items(practiceSessions, key = { it.first.practiceSessionId.ifBlank { it.first.id } }) { (rec, attemptCount) ->
             ListItem(
                 modifier = Modifier.clickable { openResultId = rec.id },
                 headlineContent = { Text(rec.title.removePrefix("Practice — "), fontWeight = FontWeight.Medium) },
                 supportingContent = {
-                    Text("$attemptCount percobaan • ${formatClock(rec.chunks.sumOf { it.durationMs })} • ${statusLabel(rec.status)}")
+                    Text("$attemptCount percobaan • ${formatClock(if (rec.cloudDurationMs > 0) rec.cloudDurationMs else rec.chunks.sumOf { it.durationMs })} • ${statusLabel(rec.status)}")
                 },
                 trailingContent = {
                     Icon(Icons.Default.ChevronRight, contentDescription = "Lihat sesi latihan")

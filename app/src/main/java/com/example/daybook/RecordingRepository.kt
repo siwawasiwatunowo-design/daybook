@@ -63,7 +63,9 @@ data class Recording(
     val processingStage: String = "AudioUploaded",
     val processingStep: Int = 1,
     val processingTotalSteps: Int = 7,
-    val processingDetail: String = ""
+    val processingDetail: String = "",
+    val cloudOnly: Boolean = false,
+    val cloudDurationMs: Long = 0L
 )
 
 /** "62:15" or "1:02:15". */
@@ -343,7 +345,9 @@ object RecordingRepository {
                     .put("processingStage", r.processingStage)
                     .put("processingStep", r.processingStep)
                     .put("processingTotalSteps", r.processingTotalSteps)
-                    .put("processingDetail", r.processingDetail))
+                    .put("processingDetail", r.processingDetail)
+                    .put("cloudOnly", r.cloudOnly)
+                    .put("cloudDurationMs", r.cloudDurationMs))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -417,7 +421,9 @@ object RecordingRepository {
                     o.optString("processingStage", "AudioUploaded"),
                     o.optInt("processingStep", 1),
                     o.optInt("processingTotalSteps", 7),
-                    o.optString("processingDetail", "")
+                    o.optString("processingDetail", ""),
+                    o.optBoolean("cloudOnly", false),
+                    o.optLong("cloudDurationMs", 0L)
                 ))
             }
             _recordings.value = list

@@ -220,7 +220,13 @@ object DaybookApiClient {
         activityCode: String = "GENERAL_MEETING",
         language: String = "id",
         enableSpeakingCoach: Boolean = false,
-        speakingCoachTopic: String? = null
+        speakingCoachTopic: String? = null,
+        practiceTitle: String? = null,
+        practiceSessionId: String? = null,
+        practiceAttemptNumber: Int = 1,
+        practicePrompt: String? = null,
+        practiceMode: String? = null,
+        sourceNoteId: String? = null
     ): String {
         val baseUrl = DaybookApiConfig.getBaseUrl(context)
         val token = getAuthToken()
@@ -233,6 +239,12 @@ object DaybookApiClient {
             put("enableSpeakingCoach", enableSpeakingCoach)
             if (enableSpeakingCoach && !speakingCoachTopic.isNullOrBlank()) {
                 put("speakingCoachTopic", speakingCoachTopic)
+                put("practiceTitle", practiceTitle.orEmpty())
+                put("practiceSessionId", practiceSessionId.orEmpty())
+                put("practiceAttemptNumber", practiceAttemptNumber.coerceAtLeast(1))
+                put("practicePrompt", practicePrompt.orEmpty())
+                put("practiceMode", practiceMode ?: "SOLO")
+                put("sourceNoteId", sourceNoteId.orEmpty())
             }
         }.toString()
 
@@ -250,6 +262,79 @@ object DaybookApiClient {
             }
             val json = JSONObject(body)
             return json.optString("id", json.optString("Id", ""))
+        }
+    }
+
+
+    /**
+     * Rehydrate cloud-backed Solo Practice history after reinstall or on a new device.
+     * The endpoint is account-scoped; no local audio files are required to show results.
+     */
+    fun getPracticeHistory(context: Context): List<Recording> {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val request = Request.Builder()
+            .url("$baseUrl/api/practice/history")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .get().build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Gagal mengambil histori Practice (HTTP " + response.code + "): " + body)
+            val array = JSONArray(body)
+            return (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                val id = item.optString("id")
+                val chunksArray = item.optJSONArray("chunks") ?: JSONArray()
+                val chunks = (0 until chunksArray.length()).map { ci ->
+                    val chunk = chunksArray.getJSONObject(ci)
+                    val transcript = chunk.optString("refinedTranscript")
+                        .ifBlank { chunk.optString("rawTranscript") }
+                    Chunk(
+                        index = chunk.optInt("sequence", ci) + 1,
+                        fileName = "",
+                        durationMs = 0L,
+                        status = if (transcript.isNotBlank()) "TRANSCRIBED" else "FAILED",
+                        transcript = transcript,
+                        segments = parseSegments(chunk.optString("sttSegmentsJson"))
+                    )
+                }
+                val createdAt = runCatching {
+                    java.time.Instant.parse(item.optString("createdAt")).toEpochMilli()
+                }.getOrDefault(System.currentTimeMillis())
+                val apiStatus = item.optString("status")
+                val localStatus = when (apiStatus.lowercase()) {
+                    "completed" -> "DONE"
+                    "needsreview" -> "PARTIAL"
+                    "failed" -> "FAILED"
+                    else -> "PROCESSING"
+                }
+                Recording(
+                    id = id,
+                    title = item.optString("title", "Practice — Speaking Practice"),
+                    createdAt = createdAt,
+                    dirName = id,
+                    status = localStatus,
+                    chunks = chunks,
+                    mom = item.optString("momJson").takeUnless { it == "null" }.orEmpty(),
+                    sessionType = "PRACTICE",
+                    practicePrompt = item.optString("practicePrompt"),
+                    coaching = item.optString("speakingCoachResult").takeUnless { it == "null" }.orEmpty(),
+                    practiceSessionId = item.optString("practiceSessionId").ifBlank { id },
+                    attemptNumber = item.optInt("attemptNumber", 1).coerceAtLeast(1),
+                    practiceMode = item.optString("practiceMode", "SOLO"),
+                    sourceNoteId = item.optString("sourceNoteId"),
+                    coachingStatus = item.optString("speakingCoachStatus", "NotRequested"),
+                    coachingError = item.optString("speakingCoachError").takeUnless { it == "null" }.orEmpty(),
+                    backendJobId = id,
+                    processingStage = item.optString("processingStage", "Completed"),
+                    processingStep = item.optInt("processingStep", 7),
+                    processingTotalSteps = item.optInt("processingTotalSteps", 7),
+                    processingDetail = item.optString("processingDetail"),
+                    cloudOnly = true,
+                    cloudDurationMs = item.optInt("durationSeconds", 0).coerceAtLeast(0) * 1000L
+                )
+            }
         }
     }
 
