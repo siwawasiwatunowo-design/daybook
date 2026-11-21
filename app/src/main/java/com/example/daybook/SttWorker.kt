@@ -113,7 +113,9 @@ class SttWorker(
                 }
             }
 
-            // Step 4: Poll backend status until complete
+            RecordingRepository.update(id) { it.copy(backendJobId = jobId) }
+
+            // Step 4: Poll backend status until transcript processing is complete
             var attempts = 0
             val maxAttempts = if (isSoloPractice) 180 else 120 // Practice allows up to 9 minutes; regular recordings stay unchanged.
             var completedJob: BackendJobStatus? = null
@@ -123,6 +125,16 @@ class SttWorker(
                 attempts++
 
                 val status = DaybookApiClient.getJobStatus(applicationContext, jobId)
+                RecordingRepository.update(id) { local ->
+                    local.copy(
+                        processingStage = status.processingStage,
+                        processingStep = status.processingStep,
+                        processingTotalSteps = status.processingTotalSteps,
+                        processingDetail = status.processingDetail,
+                        coachingStatus = status.speakingCoachStatus,
+                        coachingError = status.speakingCoachError.orEmpty()
+                    )
+                }
                 // NeedsReview is terminal: the transcript is saved, but quality checks
                 // or optional AI refinement/MoM require review. Do not poll until timeout.
                 if (status.status.equals("Completed", ignoreCase = true) ||
