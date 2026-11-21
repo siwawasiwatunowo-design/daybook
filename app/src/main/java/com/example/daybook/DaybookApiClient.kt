@@ -345,10 +345,10 @@ object DaybookApiClient {
                 SpeakingCoachEvaluationRecord(
                     id = item.optString("id"),
                     version = item.optInt("version"),
-                    feedback = item.optString("feedback"),
+                    feedback = item.optString("feedback").takeUnless { it == "null" }.orEmpty(),
                     status = item.optString("status"),
-                    result = item.optString("result"),
-                    error = item.optString("error"),
+                    result = item.optString("result").takeUnless { it == "null" }.orEmpty(),
+                    error = item.optString("error").takeUnless { it == "null" }.orEmpty(),
                     attemptCount = item.optInt("attemptCount"),
                     createdAt = item.optString("createdAt"),
                     completedAt = item.optString("completedAt")
