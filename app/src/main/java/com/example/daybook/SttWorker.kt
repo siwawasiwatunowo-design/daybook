@@ -194,7 +194,7 @@ class SttWorker(
                         "Transkripsi selesai (Groq Whisper Large-V3)",
                     coaching = completedJob.speakingCoachResult,
                     coachingStatus = completedJob.speakingCoachStatus,
-                    coachingError = completedJob.speakingCoachError
+                    coachingError = completedJob.speakingCoachError.orEmpty()
                 )
             }
 
