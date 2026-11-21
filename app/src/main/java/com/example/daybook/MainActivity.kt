@@ -730,7 +730,11 @@ private fun startRecording(
     context: Context,
     customTitle: String? = null,
     sessionType: String = "MEETING",
-    practicePrompt: String = ""
+    practicePrompt: String = "",
+    practiceSessionId: String = "",
+    attemptNumber: Int = 1,
+    practiceMode: String = "SOLO",
+    sourceNoteId: String = ""
 ) {
     val id = System.currentTimeMillis().toString()
     val title = customTitle ?: ("Meeting " + SimpleDateFormat("d MMM HH:mm", Locale("id", "ID")).format(Date()))
@@ -741,6 +745,10 @@ private fun startRecording(
         putExtra(RecordingService.EXTRA_TITLE, title)
         putExtra(RecordingService.EXTRA_SESSION_TYPE, sessionType)
         putExtra(RecordingService.EXTRA_PRACTICE_PROMPT, practicePrompt)
+        putExtra(RecordingService.EXTRA_PRACTICE_SESSION_ID, practiceSessionId.ifBlank { if (sessionType == "PRACTICE") id else "" })
+        putExtra(RecordingService.EXTRA_ATTEMPT_NUMBER, attemptNumber.coerceAtLeast(1))
+        putExtra(RecordingService.EXTRA_PRACTICE_MODE, practiceMode)
+        putExtra(RecordingService.EXTRA_SOURCE_NOTE_ID, sourceNoteId)
     }
     ContextCompat.startForegroundService(context, intent)
 }
