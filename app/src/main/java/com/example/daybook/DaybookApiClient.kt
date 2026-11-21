@@ -266,6 +266,24 @@ object DaybookApiClient {
     }
 
 
+    /** Request the backend to retry an existing failed/needs-review recording job. */
+    fun retryRecording(context: Context, recordingJobId: String) {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val request = Request.Builder()
+            .url("$baseUrl/api/recordings/$recordingJobId/retry")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post("{}".toRequestBody(JSON_MEDIA))
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException("Gagal meminta pemrosesan ulang (HTTP ${response.code}): $body")
+            }
+        }
+    }
+
     /**
      * Rehydrate cloud-backed Solo Practice history after reinstall or on a new device.
      * The endpoint is account-scoped; no local audio files are required to show results.
