@@ -56,7 +56,9 @@ data class Recording(
     val practiceSessionId: String = "",
     val attemptNumber: Int = 1,
     val practiceMode: String = "SOLO",
-    val sourceNoteId: String = ""
+    val sourceNoteId: String = "",
+    val coachingStatus: String = "NotRequested",
+    val coachingError: String = ""
 )
 
 /** "62:15" or "1:02:15". */
@@ -329,7 +331,9 @@ object RecordingRepository {
                     .put("practiceSessionId", r.practiceSessionId)
                     .put("attemptNumber", r.attemptNumber)
                     .put("practiceMode", r.practiceMode)
-                    .put("sourceNoteId", r.sourceNoteId))
+                    .put("sourceNoteId", r.sourceNoteId)
+                    .put("coachingStatus", r.coachingStatus)
+                    .put("coachingError", r.coachingError))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -396,7 +400,9 @@ object RecordingRepository {
                     o.optString("practiceSessionId", ""),
                     o.optInt("attemptNumber", 1),
                     o.optString("practiceMode", "SOLO"),
-                    o.optString("sourceNoteId", "")
+                    o.optString("sourceNoteId", ""),
+                    o.optString("coachingStatus", "NotRequested"),
+                    o.optString("coachingError", "")
                 ))
             }
             _recordings.value = list
