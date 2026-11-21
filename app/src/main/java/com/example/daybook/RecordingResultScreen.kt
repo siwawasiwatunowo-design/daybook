@@ -11,8 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
@@ -86,8 +84,8 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     // Audio playback: all chunks as one timeline, same clock as the transcript segments.
     val player = remember(rec.id, rec.chunks.size) {
         RecordingPlayer(
-            rec.chunks.map { RecordingRepository.chunkFile(rec.id, it.fileName) },
-            rec.chunks.map { it.durationMs }
+            if (rec.cloudOnly) emptyList() else rec.chunks.map { RecordingRepository.chunkFile(rec.id, it.fileName) },
+            if (rec.cloudOnly) emptyList() else rec.chunks.map { it.durationMs }
         )
     }
     DisposableEffect(player) { onDispose { player.release() } }
@@ -100,13 +98,13 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var dragging by remember { mutableStateOf(false) }
     var sliderPos by remember { mutableFloatStateOf(0f) }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "Kembali") }
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium)
-                Text(formatClock(rec.chunks.sumOf { it.durationMs }) + " • transkrip",
+                Text(formatClock(if (rec.cloudDurationMs > 0) rec.cloudDurationMs else rec.chunks.sumOf { it.durationMs }) + " • transkrip",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -237,14 +235,14 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                         Toast.makeText(context, ex.message ?: "Gagal menyiapkan file WAV", Toast.LENGTH_LONG).show()
                     }
                 },
-                enabled = rec.chunks.isNotEmpty()
+                enabled = rec.chunks.isNotEmpty() && !rec.cloudOnly
             ) { Text("WAV") }
             Button(onClick = { showSaveDialog = true }, enabled = hasText && !saved) {
                 Text(if (saved) "Tersimpan ✓" else "Simpan ke Notes")
             }
         }
 
-        if (player.totalMs > 0) {
+        if (!rec.cloudOnly && player.totalMs > 0) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { player.toggle() }) {
                     Icon(
@@ -275,7 +273,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         )
         HorizontalDivider()
 
-        LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             if (rec.sessionType == "PRACTICE") item {
                 SpeakingCoachReviewPanel(context, rec)
             }
@@ -304,9 +302,9 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             if (!hasText) item {
                 Text("Belum ada teks. Bisa jadi tidak ada ucapan yang terdeteksi, atau transkripsi belum selesai.",
                     Modifier.padding(vertical = 16.dp))
-            } else if (segs.isEmpty()) item {
+            } else if (segs.isEmpty()) {
                 Text(fallback)
-            } else items(segs) { s ->
+            } else segs.forEach { s ->
                 val active = (player.playing || player.positionMs > 0L) &&
                     player.positionMs >= s.startMs && player.positionMs < s.endMs
                 Row(
