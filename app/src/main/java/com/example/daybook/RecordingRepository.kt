@@ -58,7 +58,12 @@ data class Recording(
     val practiceMode: String = "SOLO",
     val sourceNoteId: String = "",
     val coachingStatus: String = "NotRequested",
-    val coachingError: String = ""
+    val coachingError: String = "",
+    val backendJobId: String = "",
+    val processingStage: String = "AudioUploaded",
+    val processingStep: Int = 1,
+    val processingTotalSteps: Int = 7,
+    val processingDetail: String = ""
 )
 
 /** "62:15" or "1:02:15". */
@@ -333,7 +338,12 @@ object RecordingRepository {
                     .put("practiceMode", r.practiceMode)
                     .put("sourceNoteId", r.sourceNoteId)
                     .put("coachingStatus", r.coachingStatus)
-                    .put("coachingError", r.coachingError))
+                    .put("coachingError", r.coachingError)
+                    .put("backendJobId", r.backendJobId)
+                    .put("processingStage", r.processingStage)
+                    .put("processingStep", r.processingStep)
+                    .put("processingTotalSteps", r.processingTotalSteps)
+                    .put("processingDetail", r.processingDetail))
             }
             FileOutputStream(tmp).use { out ->
                 out.write(arr.toString().toByteArray(Charsets.UTF_8))
@@ -402,7 +412,12 @@ object RecordingRepository {
                     o.optString("practiceMode", "SOLO"),
                     o.optString("sourceNoteId", ""),
                     o.optString("coachingStatus", "NotRequested"),
-                    o.optString("coachingError", "")
+                    o.optString("coachingError", ""),
+                    o.optString("backendJobId", ""),
+                    o.optString("processingStage", "AudioUploaded"),
+                    o.optInt("processingStep", 1),
+                    o.optInt("processingTotalSteps", 7),
+                    o.optString("processingDetail", "")
                 ))
             }
             _recordings.value = list
