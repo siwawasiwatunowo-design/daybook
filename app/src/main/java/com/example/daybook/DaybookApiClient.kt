@@ -97,6 +97,27 @@ object DaybookApiClient {
     }
 
 
+
+    fun compareSpeakingAttempts(context: Context, earlierTranscript: String, laterTranscript: String, topic: String = ""): String {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val body = JSONObject()
+            .put("earlierTranscript", earlierTranscript)
+            .put("laterTranscript", laterTranscript)
+            .put("topic", topic)
+            .toString()
+        val request = Request.Builder().url("$baseUrl/api/speaking/compare")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA)).build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Perbandingan Speaking Coach gagal (HTTP ${response.code}): $responseBody")
+            return JSONObject(responseBody).optString("comparison")
+                .ifBlank { throw IOException("Speaking Coach tidak mengembalikan hasil perbandingan.") }
+        }
+    }
+
     fun coachSpeaking(context: Context, transcript: String): String {
         val baseUrl = DaybookApiConfig.getBaseUrl(context)
         val token = getAuthToken()
