@@ -53,7 +53,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     val rec = recs.firstOrNull { it.id == recordingId }
 
     // All attempts belonging to the same practice session, including legacy V1 sessions.
-    val sessionKey = rec?.practiceSessionId?.ifBlank { rec.id }.orEmpty()
+    val sessionKey = rec?.let { it.practiceSessionId.ifBlank { it.id } }.orEmpty()
     val sessionAttempts = recs.filter {
         it.sessionType == "PRACTICE" &&
             (it.practiceSessionId.ifBlank { it.id }) == sessionKey
