@@ -131,7 +131,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
                     }
                 },
                 enabled = hasText && !coachingLoading &&
-                    !(rec.sessionType == "PRACTICE" && rec.coachingStatus in setOf("Queued", "Processing"))
+                    (rec.sessionType != "PRACTICE" || rec.coaching.isNotBlank() || rec.coachingStatus == "NotRequested")
             ) {
                 if (coachingLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 else Text(if (rec.coaching.isNotBlank()) "Lihat Speaking Coach" else "Speaking Coach")
