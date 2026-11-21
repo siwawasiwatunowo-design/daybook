@@ -265,8 +265,8 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         }
 
         Text(
-            "Transkrip cloud (Groq Whisper Large-V3). " +
-                "Ketuk satu baris untuk memutar audio dari momen itu.",
+            if (rec.cloudOnly) "Transkrip tersimpan di cloud. Audio asli tidak tersedia di perangkat ini."
+            else "Transkrip cloud (Groq Whisper Large-V3). Ketuk satu baris untuk memutar audio dari momen itu.",
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
