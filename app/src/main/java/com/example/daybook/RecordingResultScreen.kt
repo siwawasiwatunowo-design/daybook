@@ -77,6 +77,9 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
     var comparisonLoading by remember { mutableStateOf(false) }
     var comparisonError by remember { mutableStateOf<String?>(null) }
     var retryQueued by remember(rec.id) { mutableStateOf(false) }
+    LaunchedEffect(rec.status) {
+        if (rec.status != "PROCESSING") retryQueued = false
+    }
     val scope = rememberCoroutineScope()
 
     // Solo Practice Speaking Coach is produced by the existing backend Recording job pipeline.
