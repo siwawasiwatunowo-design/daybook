@@ -107,6 +107,11 @@ class SttWorker(
                 enableSpeakingCoach = isSoloPractice,
                 speakingCoachTopic = if (isSoloPractice) rec.practicePrompt else null
             )
+            if (isSoloPractice) {
+                RecordingRepository.update(id) {
+                    it.copy(coachingStatus = "Queued", coachingError = "")
+                }
+            }
 
             // Step 4: Poll backend status until complete
             var attempts = 0
