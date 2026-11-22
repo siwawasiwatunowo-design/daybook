@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -40,6 +42,7 @@ fun LearningExperienceScreen(
     onStartSpeaking: (String, String) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf("") }
     var material by remember { mutableStateOf("") }
     var guide by remember { mutableStateOf<LearningGuide?>(null) }
@@ -94,8 +97,19 @@ fun LearningExperienceScreen(
                     loading = true
                     error = null
                     reflection = null
-                    // Network work is dispatched from the API client on IO.
-                    kotlinx.coroutines.GlobalScope // placeholder
+                    scope.launch {
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                DaybookApiClient.prepareLearning(context, title.trim(), material.trim())
+                            }
+                            guide = result.first
+                            guideJson = result.second
+                        } catch (e: Exception) {
+                            error = e.message ?: "Materi belum dapat diproses."
+                        } finally {
+                            loading = false
+                        }
+                    }
                 },
                 enabled = !loading && material.trim().length >= 80,
                 modifier = Modifier.fillMaxWidth()
@@ -156,8 +170,20 @@ fun LearningExperienceScreen(
                 onClick = {
                     loading = true
                     error = null
-                    // Filled below by the screen coroutine effect.
-                    reflection = null
+                    scope.launch {
+                        try {
+                            reflection = withContext(Dispatchers.IO) {
+                                DaybookApiClient.reflectLearning(
+                                    context, material.trim(), guideJson,
+                                    answers.toList(), opinion.trim()
+                                )
+                            }
+                        } catch (e: Exception) {
+                            error = e.message ?: "Refleksi belum dapat dibuat."
+                        } finally {
+                            loading = false
+                        }
+                    }
                 },
                 enabled = !loading && (answers.any { it.isNotBlank() } || opinion.isNotBlank()),
                 modifier = Modifier.fillMaxWidth()
