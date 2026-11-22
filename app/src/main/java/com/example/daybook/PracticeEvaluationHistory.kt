@@ -59,7 +59,7 @@ fun PracticeEvaluationHistoryPanel(context: Context, backendJobId: String) {
         }
     }
 
-    LaunchedEffect(backendJobId) {
+    LaunchedEffect(backendJobId, evaluations.lastOrNull()?.status) {
         refresh()
         while (evaluations.any { it.status.equals("Queued", true) || it.status.equals("Processing", true) || it.status.equals("RetryPending", true) }) {
             delay(2500)
