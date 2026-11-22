@@ -72,7 +72,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -327,16 +326,13 @@ class VM : ViewModel() {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 val TABS = listOf(
-    Triple("block", "Timebox", "🗓"), Triple("note", "Notes", "📝"),
-    Triple("dream", "Dreams", "🌙"), Triple("bucket", "Bucket list", "⭐"),
-    Triple("practice", "Practice", "🎯"), Triple("record", "Rekam", "🎙")
+    Triple("note", "Notes", "📝"),
+    Triple("practice", "Practice", "🎯"),
+    Triple("record", "Meeting", "🎙")
 )
 val TAGS = mapOf(
-    "note"   to listOf("Journal", "Learning", "Thoughts", "Ideas"),
-    "dream"  to listOf("Normal", "Recurring", "Nightmare", "Lucid"),
-    "bucket" to listOf("Travel", "Growth", "Career", "Health", "Family", "Finance", "Adventure", "Other")
+    "note" to listOf("Journal", "Learning", "Thoughts", "Ideas")
 )
-val STATUS = listOf("Dream", "Planned", "Done")
 val TEXT_COLORS = listOf(
     Color.Unspecified to "Default", Color(0xFFE53935) to "Red",
     Color(0xFFFF6F00) to "Orange", Color(0xFF2E7D32) to "Green",
@@ -390,7 +386,11 @@ fun Home(vm: VM) {
         Box(Modifier.padding(pad).fillMaxSize()) {
             key(tab) {
                 val t = TABS[tab].first
-                when (t) { "record" -> RecordingsScreen(vm); "practice" -> PracticeModeScreen(vm); else -> Screen(t, vm) }
+                when (t) {
+                    "record" -> RecordingsScreen(vm)
+                    "practice" -> PracticeModeScreen(vm)
+                    else -> NotesScreen(vm)
+                }
             }
         }
     }
@@ -773,68 +773,50 @@ private fun sendToService(context: Context, action: String, markType: String?) {
 
 // ─── Section Screen ──────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Screen(t: String, vm: VM) {
-    val all by vm.list(t).collectAsState(initial = emptyList())
+fun NotesScreen(vm: VM) {
+    val all by vm.list("note").collectAsState(initial = emptyList())
     var edit by remember { mutableStateOf<Entry?>(null) }
-    var day by remember { mutableStateOf(LocalDate.now()) }
-    var q by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
 
-    val rows = when (t) {
-        "block" -> all.filter { it.date == day.toString() }.sortedBy { it.start }
-        else -> all.filter { (it.title + it.body + it.tag).contains(q, ignoreCase = true) }.let { r ->
-            when (t) {
-                "dream"  -> r.sortedByDescending { it.date }
-                "bucket" -> r.sortedBy { s -> STATUS.indexOf(s.status).let { i -> if (i == 1) 0 else if (i == 0) 1 else 2 } }
-                else     -> r
-            }
-        }
+    val rows = all.filter {
+        (it.title + it.body + it.tag).contains(query, ignoreCase = true)
     }
 
     Box(Modifier.fillMaxSize()) {
         Column {
-            if (t == "block") {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                    TextButton({ day = day.minusDays(1) }) { Text("‹") }
-                    TextButton({ day = LocalDate.now() }) {
-                        Text(day.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy")))
-                    }
-                    TextButton({ day = day.plusDays(1) }) { Text("›") }
-                }
-                Text("${rows.count { it.done }} of ${rows.size} done",
-                    Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-            } else {
-                OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth().padding(12.dp, 8.dp),
-                    label = { Text("Search") }, singleLine = true)
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                label = { Text("Cari catatan") },
+                singleLine = true
+            )
+
+            if (rows.isEmpty()) {
+                Text(
+                    if (query.isBlank()) "Belum ada catatan. Tap + untuk mulai menulis."
+                    else "Tidak ada catatan yang cocok.",
+                    Modifier.padding(16.dp)
+                )
             }
 
-            if (rows.isEmpty()) Text("Nothing here yet. Tap + to add.", Modifier.padding(16.dp))
-
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
-                items(rows, key = { it.id }) { e ->
-                    SwipeToDeleteItem(onDelete = { vm.del(e) }) {
+                items(rows, key = { it.id }) { entry ->
+                    SwipeToDeleteItem(onDelete = { vm.del(entry) }) {
                         ListItem(
-                            modifier = Modifier.clickable { edit = e },
-                            headlineContent = {
-                                Text(e.title, textDecoration =
-                                    if (e.done || (e.status == "Done" && t == "bucket")) TextDecoration.LineThrough else null)
-                            },
+                            modifier = Modifier.clickable { edit = entry },
+                            headlineContent = { Text(entry.title.ifBlank { "Tanpa judul" }) },
                             supportingContent = {
-                                val line = when (t) {
-                                    "block"  -> "${e.start} – ${e.end}"
-                                    "note"   -> e.tag + if (e.body.isNotBlank()) "\n${Html.fromHtml(e.body, Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim().take(100)}" else ""
-                                    "dream"  -> "${e.date}, ${e.tag}, sleep ${e.sleep}/5" + if (e.body.isNotBlank()) "\n${e.body.take(60)}" else ""
-                                    else     -> e.tag + if (e.year > 0) ", ${e.year}" else ""
-                                }
-                                Text(line, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            },
-                            trailingContent = {
-                                if (t == "block") Checkbox(e.done, { vm.save(e.copy(done = it)) })
-                                if (t == "bucket") TextButton({
-                                    vm.save(e.copy(status = STATUS[(STATUS.indexOf(e.status) + 1) % 3]))
-                                }) { Text(e.status) }
+                                val preview = Html.fromHtml(
+                                    entry.body,
+                                    Html.FROM_HTML_MODE_LEGACY
+                                ).toString().replace(Regex("\\s+"), " ").trim().take(120)
+                                Text(
+                                    listOf(entry.tag, preview).filter { it.isNotBlank() }.joinToString(" • "),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         )
                     }
@@ -844,19 +826,26 @@ fun Screen(t: String, vm: VM) {
         }
 
         FloatingActionButton(
-            onClick = { edit = Entry(type = t, title = "", tag = TAGS[t]?.first() ?: "",
-                date = (if (t == "block") day else LocalDate.now()).toString()) },
+            onClick = {
+                edit = Entry(
+                    type = "note",
+                    title = "",
+                    tag = TAGS["note"]?.first().orEmpty(),
+                    date = LocalDate.now().toString()
+                )
+            },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-        ) { Icon(Icons.Default.Add, "Add") }
+        ) {
+            Icon(Icons.Default.Add, "Tambah catatan")
+        }
     }
 
-    edit?.let { e ->
-        if (e.type == "note") {
-            NoteEditor(entry = e, vm = vm, onClose = { edit = null; vm.saveStatus.value = SaveStatus.IDLE })
-        } else {
-            Editor(e, onSave = { vm.save(it); edit = null },
-                onDelete = { vm.del(e); edit = null }, onClose = { edit = null })
-        }
+    edit?.let { entry ->
+        NoteEditor(
+            entry = entry,
+            vm = vm,
+            onClose = { edit = null; vm.saveStatus.value = SaveStatus.IDLE }
+        )
     }
 }
 
@@ -1237,103 +1226,6 @@ fun Chips(options: List<String>, selected: String, onPick: (String) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         options.forEach { FilterChip(selected == it, { onPick(it) }, { Text(it) }) }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun Editor(e: Entry, onSave: (Entry) -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
-    var x by remember { mutableStateOf(e) }
-    var showStartPicker by remember { mutableStateOf(false) }
-    var showEndPicker   by remember { mutableStateOf(false) }
-    var showDatePicker  by remember { mutableStateOf(false) }
-
-    fun parseHour(t: String)    = t.split(":").firstOrNull()?.toIntOrNull() ?: 9
-    fun parseMinute(t: String)  = t.split(":").lastOrNull()?.toIntOrNull() ?: 0
-    fun fmtTime(h: Int, m: Int) = "%02d:%02d".format(h, m)
-
-    val valid = x.title.isNotBlank() && (x.type != "block" || x.end > x.start)
-
-    if (showStartPicker) {
-        val tps = rememberTimePickerState(parseHour(x.start), parseMinute(x.start), true)
-        TimePickerDialog("Start time", { x = x.copy(start = fmtTime(tps.hour, tps.minute)); showStartPicker = false },
-            { showStartPicker = false }) { TimePicker(tps) }
-    }
-    if (showEndPicker) {
-        val tpe = rememberTimePickerState(parseHour(x.end), parseMinute(x.end), true)
-        TimePickerDialog("End time", { x = x.copy(end = fmtTime(tpe.hour, tpe.minute)); showEndPicker = false },
-            { showEndPicker = false }) { TimePicker(tpe) }
-    }
-    if (showDatePicker) {
-        val dpState = rememberDatePickerState(
-            initialSelectedDateMillis = runCatching {
-                LocalDate.parse(x.date).toEpochDay() * 86_400_000L
-            }.getOrDefault(System.currentTimeMillis()))
-        DatePickerDialog(onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton({
-                    dpState.selectedDateMillis?.let { ms ->
-                        val d = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate()
-                        x = x.copy(date = d.toString())
-                    }
-                    showDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = { TextButton({ showDatePicker = false }) { Text("Cancel") } }
-        ) { DatePicker(dpState) }
-    }
-
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text(if (e.id.isEmpty()) "New entry" else "Edit entry") },
-        confirmButton = {
-            TextButton({ onSave(x.copy(upd = System.currentTimeMillis())) }, enabled = valid) { Text("Save") }
-        },
-        dismissButton = {
-            Row {
-                if (e.id.isNotEmpty()) TextButton(onDelete) { Text("Delete") }
-                TextButton(onClose) { Text("Cancel") }
-            }
-        },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(x.title, { x = x.copy(title = it) }, Modifier.fillMaxWidth(), label = { Text("Title") })
-                if (x.type == "block") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(x.start, {}, Modifier.weight(1f).clickable { showStartPicker = true },
-                            label = { Text("Start") }, enabled = false, singleLine = true)
-                        OutlinedTextField(x.end, {}, Modifier.weight(1f).clickable { showEndPicker = true },
-                            label = { Text("End") }, enabled = false, singleLine = true)
-                    }
-                    if (x.end <= x.start) Text("End must be after start",
-                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-                if (x.type == "dream") {
-                    OutlinedTextField(x.date, {}, Modifier.fillMaxWidth().clickable { showDatePicker = true },
-                        label = { Text("Date") }, enabled = false)
-                }
-                if (x.type == "note" || x.type == "dream")
-                    OutlinedTextField(x.body, { x = x.copy(body = it) }, Modifier.fillMaxWidth(),
-                        label = { Text("Details") }, minLines = 4)
-                TAGS[x.type]?.let { Chips(it, x.tag) { s -> x = x.copy(tag = s) } }
-                if (x.type == "dream")
-                    Chips((1..5).map { "Sleep $it" }, "Sleep ${x.sleep}") { s -> x = x.copy(sleep = s.last().digitToInt()) }
-                if (x.type == "bucket") {
-                    Chips(STATUS, x.status) { s -> x = x.copy(status = s) }
-                    OutlinedTextField(if (x.year > 0) x.year.toString() else "",
-                        { s -> x = x.copy(year = s.filter(Char::isDigit).take(4).toIntOrNull() ?: 0) },
-                        Modifier.fillMaxWidth(), label = { Text("Target year (optional)") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun TimePickerDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit, content: @Composable () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { content() },
-        confirmButton = { TextButton(onConfirm) { Text("OK") } },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
 // ─── Login ───────────────────────────────────────────────────────────────────
