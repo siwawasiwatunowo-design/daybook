@@ -308,6 +308,8 @@ These are code-review findings, not yet implementation changes:
 - `RecordingResultScreen.kt` contains a stale KDoc statement claiming audio never leaves the phone. The current `SttWorker` uploads audio to Neon Object Storage for cloud transcription.
 - `README.md` and `SYSTEM_FLOW.md` still describe retired planner sections and older architecture. Documentation needs a coordinated update after current flows are verified.
 - The current main activity remains highly concentrated in `MainActivity.kt`; modularization should be gradual and should not be mixed into risky recording-pipeline changes.
+- Android `RecordingRepository.remove()` currently deletes local recording files and local metadata, but the inspected API exposes no recording-delete endpoint and the object-store adapter exposes no delete operation. A local delete must not be described as full cloud deletion; define and implement an account-scoped deletion lifecycle before promising complete erasure.
+- The backend recording pipeline currently retains temporary audio for diagnosis/reprocessing; retention duration and cleanup policy are not yet defined in the inspected code.
 
 ## 11. Scope boundaries
 
