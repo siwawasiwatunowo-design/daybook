@@ -130,6 +130,39 @@ fun PracticeProgressScreen(
                             }
                         }
                     }
+                    if (data.improvement.patterns.isNotEmpty()) item {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Pola komunikasi yang teramati", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "Pola ini dihitung dari temuan evaluasi pada latihan yang berbeda. Ini adalah petunjuk untuk refleksi, bukan label permanen tentang kemampuanmu.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                data.improvement.patterns.forEachIndexed { index, pattern ->
+                                    if (index > 0) HorizontalDivider()
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(pattern.title, style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium)
+                                            Text(
+                                                "${progressDimensionLabel(pattern.dimension)} • ${pattern.taskType.replace('_', ' ')}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            "${pattern.occurrences}×",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if (data.improvement.nextPractice != null) item {
                         val exercise = data.improvement.nextPractice!!
                         Card(Modifier.fillMaxWidth()) {
