@@ -37,9 +37,9 @@ import java.time.ZoneId
 
 /**
  * Transcript result screen for one recording: timed segments, Copy, Share, and
- * "Simpan ke Notes". Transcripts are local-only (RecordingRepository) until the
- * user explicitly saves one to Notes, which stores the TEXT in Firestore like any
- * other note. Audio never leaves the phone.
+ * "Simpan ke Notes". The Android app keeps its local recording copy, while the
+ * STT worker uploads audio to Daybook's cloud object storage for transcription.
+ * Transcript and processing results are also stored by the backend.
  */
 @Composable
 fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
@@ -431,7 +431,8 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
             title = { Text("Simpan ke Notes?") },
             text = {
                 Text("Teks transkrip akan disimpan sebagai catatan baru di tab Notes dan ikut tersinkron " +
-                    "ke akun Firebase kamu. Audio tetap hanya di HP ini.")
+                    "ke akun Firebase kamu. Audio rekaman juga telah diunggah ke penyimpanan cloud Daybook " +
+                    "untuk diproses; salinan lokal tetap tersimpan di HP ini.")
             },
             confirmButton = {
                 Button({
