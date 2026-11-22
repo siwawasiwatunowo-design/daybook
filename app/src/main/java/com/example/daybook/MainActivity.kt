@@ -1419,6 +1419,7 @@ fun PracticeModeScreen(vm: VM) {
     var customPromptOverride by rememberSaveable { mutableStateOf("") }
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
     var showProgress by rememberSaveable { mutableStateOf(false) }
+    var showLearning by rememberSaveable { mutableStateOf(false) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
     var cloudHistoryLoading by remember { mutableStateOf(true) }
     var cloudHistoryError by remember { mutableStateOf<String?>(null) }
@@ -1523,6 +1524,19 @@ fun PracticeModeScreen(vm: VM) {
         return
     }
 
+    if (showLearning) {
+        LearningExperienceScreen(
+            onBack = { showLearning = false },
+            onStartSpeaking = { title, instructions ->
+                selected = "custom"
+                customTopic = title
+                customPromptOverride = instructions
+                showLearning = false
+            }
+        )
+        return
+    }
+
     if (showProgress) {
         PracticeProgressScreen(
             onBack = { showProgress = false },
@@ -1553,12 +1567,13 @@ fun PracticeModeScreen(vm: VM) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Speaking Practice", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("Latih cara berpikir dan menyampaikan ide. Mulai dari satu topik, bicara, lalu pelajari feedback-mu.",
+                    Text("Practice & Thinking", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("Mulai dari konteks yang ingin kamu pahami. Bentuk pendapat, lalu berlatih bicara jika memang relevan.",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                OutlinedButton(onClick = { showProgress = true }) {
-                    Text("Progress")
+                Column(horizontalAlignment = Alignment.End) {
+                    Button(onClick = { showLearning = true }) { Text("Belajar") }
+                    TextButton(onClick = { showProgress = true }) { Text("Progress") }
                 }
             }
         }
