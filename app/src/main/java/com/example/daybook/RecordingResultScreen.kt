@@ -324,6 +324,7 @@ fun RecordingResultScreen(recordingId: String, vm: VM, onClose: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             if (rec.sessionType == "PRACTICE") {
                 SpeakingCoachReviewPanel(context, rec)
+                PracticeEvaluationHistoryPanel(context, rec.backendJobId)
             }
             if (rec.mom.isNotBlank()) {
                 Card(
