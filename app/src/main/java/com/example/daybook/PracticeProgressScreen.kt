@@ -28,7 +28,8 @@ import java.util.Locale
 @Composable
 fun PracticeProgressScreen(
     onBack: () -> Unit,
-    onOpenRecording: (String) -> Unit
+    onOpenRecording: (String) -> Unit,
+    onStartPractice: (String, String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -100,6 +101,52 @@ fun PracticeProgressScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    item {
+                        val improvement = data.improvement
+                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f)
+                        )) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Fokus perbaikan saat ini", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                                if (improvement.currentFocus == null) {
+                                    Text(improvement.message.ifBlank { "Belum ada evaluasi terstruktur yang cukup untuk menentukan fokus." },
+                                        style = MaterialTheme.typography.bodyMedium)
+                                } else {
+                                    val focus = improvement.currentFocus
+                                    Text(focus.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("${focus.dimension} • ${focus.status}", style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary)
+                                    Text(focus.explanation, style = MaterialTheme.typography.bodySmall)
+                                    if (focus.evidence.isNotBlank()) Text("Bukti: “${focus.evidence}”",
+                                        style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                    Text("Muncul pada ${focus.occurrenceCount} latihan sejenis dari ${focus.comparableAttempts} percobaan yang dapat dibandingkan.",
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(focus.improvementAdvice, style = MaterialTheme.typography.bodySmall)
+                                    Text(improvement.message, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                    if (data.improvement.nextPractice != null) item {
+                        val exercise = data.improvement.nextPractice!!
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Latihan berikutnya", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(exercise.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text(exercise.instructions, style = MaterialTheme.typography.bodyMedium)
+                                if (exercise.successCriteria.isNotEmpty()) {
+                                    Text("Yang perlu diperhatikan", style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold)
+                                    exercise.successCriteria.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                                }
+                                Button(onClick = { onStartPractice(exercise.title, exercise.instructions) },
+                                    modifier = Modifier.fillMaxWidth()) { Text("Gunakan latihan ini") }
+                            }
+                        }
                     }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
