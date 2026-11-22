@@ -76,6 +76,19 @@ data class PracticeEvaluationSummary(
     val createdAt: String
 )
 
+data class PracticeFocus(
+    val issueCode: String, val dimension: String, val title: String, val explanation: String,
+    val evidence: String, val improvementAdvice: String, val occurrenceCount: Int,
+    val comparableAttempts: Int, val positiveEvidenceAttempts: Int, val status: String, val taskType: String
+)
+data class PracticeNextPractice(
+    val title: String, val instructions: String, val successCriteria: List<String>, val taskType: String
+)
+data class PracticeImprovementData(
+    val hasEvidence: Boolean, val message: String, val currentFocus: PracticeFocus?,
+    val nextPractice: PracticeNextPractice?
+)
+
 data class PracticeProgressData(
     val totalSessions: Int,
     val totalAttempts: Int,
@@ -84,7 +97,8 @@ data class PracticeProgressData(
     val pendingEvaluations: Int,
     val lastPracticeAt: String,
     val weeks: List<PracticeWeekProgress>,
-    val latestEvaluations: List<PracticeEvaluationSummary>
+    val latestEvaluations: List<PracticeEvaluationSummary>,
+    val improvement: PracticeImprovementData
 )
 
 object DaybookApiClient {
@@ -184,6 +198,27 @@ object DaybookApiClient {
                     createdAt = item.optString("createdAt")
                 )
             }
+            val improvementJson = json.optJSONObject("improvement")
+            val focusJson = improvementJson?.optJSONObject("currentFocus")
+            val focus = focusJson?.let { PracticeFocus(
+                issueCode = it.optString("issueCode"), dimension = it.optString("dimension"),
+                title = it.optString("title"), explanation = it.optString("explanation"),
+                evidence = it.optString("evidence"), improvementAdvice = it.optString("improvementAdvice"),
+                occurrenceCount = it.optInt("occurrenceCount"), comparableAttempts = it.optInt("comparableAttempts"),
+                positiveEvidenceAttempts = it.optInt("positiveEvidenceAttempts"), status = it.optString("status"),
+                taskType = it.optString("taskType")
+            ) }
+            val exerciseJson = improvementJson?.optJSONObject("nextPractice")
+            val exercise = exerciseJson?.let { item ->
+                val criteria = item.optJSONArray("successCriteria") ?: JSONArray()
+                PracticeNextPractice(item.optString("title"), item.optString("instructions"),
+                    (0 until criteria.length()).map { criteria.optString(it) }, item.optString("taskType"))
+            }
+            val improvement = PracticeImprovementData(
+                hasEvidence = improvementJson?.optBoolean("hasEvidence") ?: false,
+                message = improvementJson?.optString("message").orEmpty(),
+                currentFocus = focus, nextPractice = exercise
+            )
             return PracticeProgressData(
                 totalSessions = json.optInt("totalSessions"),
                 totalAttempts = json.optInt("totalAttempts"),
@@ -192,7 +227,8 @@ object DaybookApiClient {
                 pendingEvaluations = json.optInt("pendingEvaluations"),
                 lastPracticeAt = json.optString("lastPracticeAt"),
                 weeks = weeks,
-                latestEvaluations = evaluations
+                latestEvaluations = evaluations,
+                improvement = improvement
             )
         }
     }

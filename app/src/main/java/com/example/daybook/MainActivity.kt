@@ -1416,6 +1416,7 @@ fun PracticeModeScreen(vm: VM) {
     val recordings by RecordingRepository.recordings.collectAsState()
     var selected by rememberSaveable { mutableStateOf("problem") }
     var customTopic by rememberSaveable { mutableStateOf("") }
+    var customPromptOverride by rememberSaveable { mutableStateOf("") }
     var openResultId by rememberSaveable { mutableStateOf<String?>(null) }
     var showProgress by rememberSaveable { mutableStateOf(false) }
     val isPracticeRecording = live?.title?.startsWith("Practice —") == true
@@ -1433,7 +1434,11 @@ fun PracticeModeScreen(vm: VM) {
         if (grants[Manifest.permission.RECORD_AUDIO] == true) {
             val topic = if (selected == "custom") customTopic.trim()
                 else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
-            startRecording(context, "Practice — $topic", "PRACTICE", if (selected == "custom") "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic" else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty())
+            val prompt = if (selected == "custom") customPromptOverride.ifBlank {
+                "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic"
+            } else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty()
+            startRecording(context, "Practice — $topic", "PRACTICE", prompt)
+            customPromptOverride = ""
         }
     }
 
@@ -1529,6 +1534,12 @@ fun PracticeModeScreen(vm: VM) {
                     showProgress = false
                     openResultId = recording.id
                 }
+            },
+            onStartPractice = { title, instructions ->
+                selected = "custom"
+                customTopic = title
+                customPromptOverride = instructions
+                showProgress = false
             }
         )
         return
@@ -1577,7 +1588,7 @@ fun PracticeModeScreen(vm: VM) {
                     Text("Topik sendiri", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     OutlinedTextField(
-                        value = customTopic, onValueChange = { customTopic = it },
+                        value = customTopic, onValueChange = { customTopic = it; customPromptOverride = "" },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Contoh: Jelaskan solusi untuk masalah keterlambatan proses...") },
                         minLines = 2,
@@ -1612,7 +1623,11 @@ fun PracticeModeScreen(vm: VM) {
                         == PackageManager.PERMISSION_GRANTED) {
                         val topic = if (selected == "custom") customTopic.trim()
                             else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.title ?: "Free Speaking"
-                        startRecording(context, "Practice — $topic", "PRACTICE", if (selected == "custom") "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic" else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty())
+                        val prompt = if (selected == "custom") customPromptOverride.ifBlank {
+                            "Jelaskan topik ini dengan konteks, poin utama, alasan atau contoh, lalu simpulkan: $topic"
+                        } else PRACTICE_TOPICS.firstOrNull { it.id == selected }?.prompt.orEmpty()
+                        startRecording(context, "Practice — $topic", "PRACTICE", prompt)
+                        customPromptOverride = ""
                     } else permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp)

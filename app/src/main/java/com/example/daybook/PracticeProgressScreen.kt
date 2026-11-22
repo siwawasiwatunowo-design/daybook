@@ -28,7 +28,8 @@ import java.util.Locale
 @Composable
 fun PracticeProgressScreen(
     onBack: () -> Unit,
-    onOpenRecording: (String) -> Unit
+    onOpenRecording: (String) -> Unit,
+    onStartPractice: (String, String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -100,6 +101,55 @@ fun PracticeProgressScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    item {
+                        val improvement = data.improvement
+                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f)
+                        )) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Fokus perbaikan saat ini", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                                if (improvement.currentFocus == null) {
+                                    Text(improvement.message.ifBlank { "Belum ada evaluasi terstruktur yang cukup untuk menentukan fokus." },
+                                        style = MaterialTheme.typography.bodyMedium)
+                                } else {
+                                    val focus = improvement.currentFocus
+                                    Text(focus.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("${progressDimensionLabel(focus.dimension)} • ${progressStatusLabel(focus.status)}",
+                                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                    Text(focus.explanation, style = MaterialTheme.typography.bodySmall)
+                                    if (focus.evidence.isNotBlank()) Text("Bukti: “${focus.evidence}”",
+                                        style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                    Text("Muncul pada ${focus.occurrenceCount} latihan sejenis dari ${focus.comparableAttempts} percobaan yang dapat dibandingkan.",
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(focus.improvementAdvice, style = MaterialTheme.typography.bodySmall)
+                                    Text(improvement.message, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                    if (data.improvement.nextPractice != null) item {
+                        val exercise = data.improvement.nextPractice!!
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Latihan berikutnya", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(exercise.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text(exercise.instructions, style = MaterialTheme.typography.bodyMedium)
+                                if (exercise.successCriteria.isNotEmpty()) {
+                                    Text("Yang perlu diperhatikan", style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold)
+                                    exercise.successCriteria.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                                }
+                                Button(onClick = { onStartPractice(exercise.title, exercise.instructions) },
+                                    modifier = Modifier.fillMaxWidth()) { Text("Gunakan latihan ini") }
+                                TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Lewati dan pilih latihan lain")
+                                }
+                            }
+                        }
                     }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -256,3 +306,21 @@ private fun formatProgressDate(value: String): String = runCatching {
     Instant.parse(value).atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale("id", "ID")))
 }.getOrElse { value.take(10) }
+
+
+private fun progressDimensionLabel(value: String): String = when (value) {
+    "Structure" -> "Struktur"
+    "Clarity" -> "Kejelasan"
+    "Context" -> "Konteks"
+    "Reasoning" -> "Penalaran"
+    "Conciseness" -> "Ringkas dan padat"
+    "Conclusion" -> "Kesimpulan"
+    else -> value
+}
+
+private fun progressStatusLabel(value: String): String = when (value) {
+    "Initial Observation" -> "Observasi awal"
+    "Recurring Pattern" -> "Pola berulang"
+    "Early Positive Signal" -> "Sinyal positif awal"
+    else -> value
+}
