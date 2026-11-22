@@ -98,9 +98,13 @@ data class PracticeFocus(
 data class PracticeNextPractice(
     val title: String, val instructions: String, val successCriteria: List<String>, val taskType: String
 )
+data class PracticePattern(
+    val issueCode: String, val dimension: String, val taskType: String,
+    val occurrences: Int, val title: String
+)
 data class PracticeImprovementData(
     val hasEvidence: Boolean, val message: String, val currentFocus: PracticeFocus?,
-    val nextPractice: PracticeNextPractice?
+    val nextPractice: PracticeNextPractice?, val patterns: List<PracticePattern>
 )
 
 data class PracticeProgressData(
@@ -228,10 +232,21 @@ object DaybookApiClient {
                 PracticeNextPractice(item.optString("title"), item.optString("instructions"),
                     (0 until criteria.length()).map { criteria.optString(it) }, item.optString("taskType"))
             }
+            val patternsJson = improvementJson?.optJSONArray("patterns") ?: JSONArray()
+            val patterns = (0 until patternsJson.length()).map { i ->
+                val item = patternsJson.getJSONObject(i)
+                PracticePattern(
+                    issueCode = item.optString("issueCode"),
+                    dimension = item.optString("dimension"),
+                    taskType = item.optString("taskType"),
+                    occurrences = item.optInt("occurrences"),
+                    title = item.optString("title")
+                )
+            }
             val improvement = PracticeImprovementData(
                 hasEvidence = improvementJson?.optBoolean("hasEvidence") ?: false,
                 message = improvementJson?.optString("message").orEmpty(),
-                currentFocus = focus, nextPractice = exercise
+                currentFocus = focus, nextPractice = exercise, patterns = patterns
             )
             return PracticeProgressData(
                 totalSessions = json.optInt("totalSessions"),
