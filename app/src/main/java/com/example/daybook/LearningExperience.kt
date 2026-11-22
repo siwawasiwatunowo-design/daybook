@@ -202,8 +202,24 @@ fun LearningExperienceScreen(
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Kalau ingin melanjutkan dengan suara", fontWeight = FontWeight.SemiBold)
                         Text(result.speakingPrompt, style = MaterialTheme.typography.bodyMedium)
-                        Button(onClick = { onStartSpeaking(current.title, result.speakingPrompt) },
-                            modifier = Modifier.fillMaxWidth()) { Text("Latih dengan suara") }
+                        Button(
+                            onClick = {
+                                val speakingContext = buildString {
+                                    appendLine("Topik: ${current.title}")
+                                    guide?.centralQuestion?.takeIf { it.isNotBlank() }?.let {
+                                        appendLine("Pertanyaan utama: $it")
+                                    }
+                                    if (opinion.isNotBlank()) appendLine("Pendapat yang ingin saya sampaikan: ${opinion.trim()}")
+                                    if (result.thinkingFeedback.isNotBlank()) {
+                                        appendLine("Refleksi pemikiran: ${result.thinkingFeedback}")
+                                    }
+                                    appendLine("Tantangan berbicara: ${result.speakingPrompt}")
+                                    append("Bantu saya menyampaikan pemikiran saya sendiri secara runtut. Jangan menambahkan fakta yang tidak saya berikan.")
+                                }
+                                onStartSpeaking(current.title, speakingContext)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Latih dengan suara") }
                     }
                 }
             }
