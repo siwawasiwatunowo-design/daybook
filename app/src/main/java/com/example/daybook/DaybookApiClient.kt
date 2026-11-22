@@ -14,6 +14,20 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+
+data class LearningTerm(val term: String, val meaning: String)
+data class LearningQuestion(val question: String, val guidance: String)
+data class LearningGuide(
+    val title: String, val overview: String, val centralQuestion: String,
+    val keyIdeas: List<String>, val terms: List<LearningTerm>,
+    val comprehensionQuestions: List<LearningQuestion>,
+    val thinkingQuestions: List<LearningQuestion>, val sourceLimitations: List<String>
+)
+data class LearningReflection(
+    val understandingFeedback: String, val understood: List<String>, val gaps: List<String>,
+    val thinkingFeedback: String, val followUpQuestion: String, val speakingPrompt: String
+)
+
 data class UploadUrlResponse(
     val uploadUrl: String,
     val audioObjectName: String,
@@ -573,6 +587,81 @@ object DaybookApiClient {
                     completedAt = item.optString("completedAt")
                 )
             }
+        }
+    }
+
+
+    fun prepareLearning(context: Context, title: String, material: String): Pair<LearningGuide, String> {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val body = JSONObject().put("title", title).put("content", material)
+            .put("sourceType", "user-provided").toString()
+        val request = Request.Builder().url("$baseUrl/api/learning/prepare")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA)).build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Gagal memahami materi (HTTP ${response.code}): $responseBody")
+            val guideJson = JSONObject(responseBody).getJSONObject("guide")
+            val ideas = guideJson.optJSONArray("keyIdeas") ?: JSONArray()
+            val terms = guideJson.optJSONArray("terms") ?: JSONArray()
+            val comprehension = guideJson.optJSONArray("comprehensionQuestions") ?: JSONArray()
+            val thinking = guideJson.optJSONArray("thinkingQuestions") ?: JSONArray()
+            val guide = LearningGuide(
+                title = guideJson.optString("title", title),
+                overview = guideJson.optString("overview"),
+                centralQuestion = guideJson.optString("centralQuestion"),
+                keyIdeas = (0 until ideas.length()).map { ideas.optString(it) },
+                terms = (0 until terms.length()).map { i ->
+                    val item = terms.optJSONObject(i) ?: JSONObject()
+                    LearningTerm(item.optString("term"), item.optString("meaning"))
+                },
+                comprehensionQuestions = (0 until comprehension.length()).map { i ->
+                    val item = comprehension.optJSONObject(i) ?: JSONObject()
+                    LearningQuestion(item.optString("question"), item.optString("expectedFocus"))
+                },
+                thinkingQuestions = (0 until thinking.length()).map { i ->
+                    val item = thinking.optJSONObject(i) ?: JSONObject()
+                    LearningQuestion(item.optString("question"), item.optString("purpose"))
+                },
+                sourceLimitations = (0 until (guideJson.optJSONArray("sourceLimitations")?.length() ?: 0)).map {
+                    guideJson.getJSONArray("sourceLimitations").optString(it)
+                }
+            )
+            return guide to guideJson.toString()
+        }
+    }
+
+    fun reflectLearning(
+        context: Context, material: String, guideJson: String,
+        answers: List<String>, opinion: String
+    ): LearningReflection {
+        val baseUrl = DaybookApiConfig.getBaseUrl(context)
+        val token = getAuthToken()
+        val answersJson = JSONArray().apply { answers.forEach { put(it) } }
+        val body = JSONObject().put("material", material).put("guideJson", guideJson)
+            .put("answers", answersJson).put("opinion", opinion).toString()
+        val request = Request.Builder().url("$baseUrl/api/learning/reflect")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .post(body.toRequestBody(JSON_MEDIA)).build()
+        httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("Gagal mengevaluasi pemahaman (HTTP ${response.code}): $responseBody")
+            val result = JSONObject(responseBody).getJSONObject("reflection")
+            fun strings(key: String): List<String> {
+                val array = result.optJSONArray(key) ?: JSONArray()
+                return (0 until array.length()).map { array.optString(it) }
+            }
+            return LearningReflection(
+                understandingFeedback = result.optString("understandingFeedback"),
+                understood = strings("understood"),
+                gaps = strings("gaps"),
+                thinkingFeedback = result.optString("thinkingFeedback"),
+                followUpQuestion = result.optString("followUpQuestion"),
+                speakingPrompt = result.optString("speakingPrompt")
+            )
         }
     }
 
