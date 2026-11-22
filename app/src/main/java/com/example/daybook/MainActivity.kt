@@ -53,6 +53,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.tasks.Tasks
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentId
@@ -60,6 +61,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.mohamedrejeb.richeditor.model.RichTextState
 import com.mohamedrejeb.richeditor.model.rememberRichTextState
 import com.mohamedrejeb.richeditor.ui.material3.RichTextEditor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -120,6 +122,8 @@ class VM : ViewModel() {
     val recordingResult = MutableStateFlow<String?>(null)
 
     private var autoSaveJob: Job? = null
+    private var pendingAutoSave: Entry? = null
+    private var autoSaveVersion: Long = 0
     private var timerJob: Job? = null
     private var mediaRecorder: MediaRecorder? = null
     private var audioFile: File? = null
@@ -142,17 +146,45 @@ class VM : ViewModel() {
     }
 
     fun autoSave(e: Entry) {
-        autoSaveJob?.cancel()
+        // Keep only the newest editor snapshot, but serialize Firestore writes.
+        // A previous write must finish before the next snapshot is written so an
+        // older in-flight request cannot overwrite newer user edits.
+        pendingAutoSave = e
+        autoSaveVersion += 1
         saveStatus.value = SaveStatus.SAVING
+        if (autoSaveJob?.isActive == true) return
+
         autoSaveJob = viewModelScope.launch {
-            delay(2000)
             try {
-                val id = e.id.ifEmpty { col().document().id }
-                col().document(id).set(e.copy(id = id, upd = System.currentTimeMillis()))
-                saveStatus.value = SaveStatus.SAVED
-                delay(2000)
-                saveStatus.value = SaveStatus.IDLE
-            } catch (ex: Exception) {
+                while (pendingAutoSave != null) {
+                    val versionAtDebounceStart = autoSaveVersion
+                    delay(2000)
+                    if (versionAtDebounceStart != autoSaveVersion) continue
+
+                    val snapshot = pendingAutoSave ?: break
+                    pendingAutoSave = null
+                    val id = snapshot.id.ifEmpty { col().document().id }
+                    withContext(Dispatchers.IO) {
+                        Tasks.await(
+                            col().document(id).set(
+                                snapshot.copy(id = id, upd = System.currentTimeMillis())
+                            )
+                        )
+                    }
+
+                    if (versionAtDebounceStart == autoSaveVersion && pendingAutoSave == null) {
+                        saveStatus.value = SaveStatus.SAVED
+                        delay(2000)
+                        if (versionAtDebounceStart == autoSaveVersion && pendingAutoSave == null) {
+                            saveStatus.value = SaveStatus.IDLE
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep the latest snapshot available so the next edit can retry it.
+                if (pendingAutoSave == null) pendingAutoSave = e
                 saveStatus.value = SaveStatus.ERROR
             }
         }
@@ -887,17 +919,20 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
     var showColorPicker by remember { mutableStateOf(false) }
     var showAiSheet by remember { mutableStateOf(false) }
     var currentEntryId by remember { mutableStateOf(entry.id) }
+    var selectedTag by remember(entry.id) {
+        mutableStateOf(entry.tag.ifEmpty { "Journal" })
+    }
 
     LaunchedEffect(entry.id) {
         if (entry.body.isNotBlank()) richState.setHtml(entry.body)
     }
 
     fun snapshot() = entry.copy(
-        id = currentEntryId, title = title,
+        id = currentEntryId, title = title, tag = selectedTag,
         body = richState.toHtml(), upd = System.currentTimeMillis()
     )
 
-    LaunchedEffect(title, richState.toHtml()) {
+    LaunchedEffect(title, richState.toHtml(), selectedTag) {
         if (title.isNotBlank() || richState.toHtml().isNotBlank()) {
             if (currentEntryId.isEmpty()) {
                 currentEntryId = FirebaseFirestore.getInstance()
@@ -981,7 +1016,6 @@ fun NoteEditor(entry: Entry, vm: VM, onClose: () -> Unit) {
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             TAGS["note"]?.let { tags ->
-                var selectedTag by remember { mutableStateOf(entry.tag.ifEmpty { "Journal" }) }
                 Chips(tags, selectedTag) { selectedTag = it }
             }
 
